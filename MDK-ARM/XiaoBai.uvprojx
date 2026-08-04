@@ -629,6 +629,11 @@
               <FileType>1</FileType>
               <FilePath>..\Protocol\Proto_Asr.c</FilePath>
             </File>
+            <File>
+              <FileName>Proto_Remote.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Protocol\Proto_Remote.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

@@ -1,6 +1,7 @@
 #include "main.h"
 #include "Bsp.h"
 #include "Proto_Asr.h"
+#include "Proto_Remote.h"
 
 /* ===== 模式与动作枚举 ===== */
 typedef enum {
@@ -248,9 +249,8 @@ int main(void)
     /* PF3 连接状态边沿检测 */
     uint8_t ble_was_connected = Bsp_UartBle_IsConnected();
 
-    /* 遥控帧流缓冲（M3 遥控模式用，先保留解析框架） */
-    static uint8_t stream[REMOTE_FRAME_LEN * 4];
-    uint16_t stream_len = 0;
+    /* 遥控帧流缓冲已迁入协议层（Proto_Remote_Init 清空其内部缓冲） */
+    Proto_Remote_Init();
 
     /* 动作命令防抖已移除：v0.7 下 ASRPRO 侧不误连发，每条 cmd 都执行。
        依赖 ASRPRO 侧命令冗余抑制；如未来发现误识别，在此处重新加防抖窗。 */
@@ -382,25 +382,14 @@ int main(void)
             ble_was_connected = ble_now;
         }
 
-        /* --- BLE 遥控帧解析（M3 接电机，先解析占位） --- */
+        /* --- BLE 遥控帧解析（协议层校验，应用层消费） --- */
         {
             uint8_t buf[REMOTE_FRAME_LEN * 2];
             uint16_t n = Bsp_UartBle_TryRecv(buf, sizeof(buf));
-            for (uint16_t k = 0; k < n; k++) {
-                if (stream_len < sizeof(stream)) stream[stream_len++] = buf[k];
-            }
-            uint16_t i = 0;
-            while (i + REMOTE_FRAME_LEN <= stream_len) {
-                if (stream[i] != REMOTE_FRAME_HEAD) { i++; continue; }
-                if (stream[i+1]!=0x97 || stream[i+2]!=0x98 ||
-                    stream[i+3]!=0x0A || stream[i+4]!=0xC1) { i++; continue; }
-                if (stream[i+REMOTE_FRAME_LEN-1] != REMOTE_FRAME_TAIL) { i++; continue; }
-                uint8_t crc = 0;
-                for (uint16_t j = 0; j < REMOTE_FRAME_LEN - 2; j++) crc += stream[i + j];
-                if (crc != stream[i + REMOTE_FRAME_LEN - 2]) { i++; continue; }
-                /* 帧有效 */
+            Proto_Remote_Feed(buf, n);
+            uint8_t keys[REMOTE_KEY_COUNT];
+            while (Proto_Remote_GetFrame(keys)) {
                 if (g_mode == APP_MODE_REMOTE) {
-                    uint8_t *keys = &stream[i + 5];
                     /* 肩键调速（边沿触发）：R1=速度+，L1=速度- */
                     if (keys[REMOTE_KEY_R1] && !g_r1_was) {
                         if (g_remote_speed < MOTOR_SPEED_HIGH) g_remote_speed++;
@@ -434,12 +423,6 @@ int main(void)
                     }
                     g_last_remote_frame = Bsp_Tick_GetMs();
                 }
-                i += REMOTE_FRAME_LEN;
-            }
-            if (i > 0) {
-                uint16_t remain = stream_len - i;
-                for (uint16_t k = 0; k < remain; k++) stream[k] = stream[i + k];
-                stream_len = remain;
             }
         }
 
