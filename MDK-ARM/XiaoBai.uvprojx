@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,PY32F030x6</Define>
               <Undefine></Undefine>
-              <IncludePath>..\User;..\CMSIS\Include;..\CMSIS\Device\PY32F0xx\Include;..\PY32F0xx_HAL_Driver\Inc;..\BSP_Drivers</IncludePath>
+              <IncludePath>..\User;..\CMSIS\Include;..\CMSIS\Device\PY32F0xx\Include;..\PY32F0xx_HAL_Driver\Inc;..\BSP_Drivers;..\Protocol</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -413,6 +413,66 @@
               <FileName>py32f0xx_hal_msp.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\py32f0xx_hal_msp.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_System.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_System.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Vehicle.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Vehicle.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Mode.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Mode.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Mode_Power.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Mode_Power.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Mode_Sensor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Mode_Sensor.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Mode_Remote.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Mode_Remote.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Mode_Voice.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Mode_Voice.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Eye.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Eye.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Breath.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Breath.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Shutdown.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Shutdown.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Battery.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Battery.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Main.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Main.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -618,6 +678,21 @@
               <FileName>Bsp_Tm1640.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\BSP_Drivers\Bsp_Tm1640\Bsp_Tm1640.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Protocol</GroupName>
+          <Files>
+            <File>
+              <FileName>Proto_Asr.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Protocol\Proto_Asr.c</FilePath>
+            </File>
+            <File>
+              <FileName>Proto_Remote.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Protocol\Proto_Remote.c</FilePath>
             </File>
           </Files>
         </Group>

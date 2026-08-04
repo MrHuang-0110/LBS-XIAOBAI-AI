@@ -8,43 +8,11 @@
  *   PF3 = STA 引脚，下拉输入（datasheet 第 4 页要求）
  *
  * ECB00 工作模式：默认就是从机透传，无需 AT 配置主从。
- *   AT 命令以 "AT" 开头 + "\r\n" 结尾，非 AT 数据透传给主机。
- *   连接/断开时 TXD 会发 "CONNECT OK\r\n" / "DISCONNECT\r\n"，
- *   但本项目只用 PF3 电平检测连接状态。
+ *   本驱动只负责原始字节收发 + PF3 连接电平检测，不解析遥控帧；
+ *   遥控帧协议（帧格式/按键枚举）见 Protocol/Proto_Remote.h。
  */
 
 #define BLE_RX_BUF_SIZE   128U
-
-/* --- 遥控器协议（resource/遥控协议.md） ---
- * 帧格式: 5A 97 98 0A C1 [10 字节键值位图] CRC A5
- *   5A    帧头
- *   97    源地址
- *   98    目标地址
- *   0A    数据长度（固定 10）
- *   C1    数据类型码
- *   xx*10 10 字节键值位图，每键 1 字节，0=未按 1=按下
- *   CRC   从帧头到数据位最后一位的累加和取低 8 位
- *   A5    帧尾
- * 总长 16 字节
- */
-#define REMOTE_FRAME_HEAD   0x5AU
-#define REMOTE_FRAME_TAIL   0xA5U
-#define REMOTE_FRAME_LEN    17U   /* 5A 97 98 0A C1 + 10数据 + CRC + A5 = 17 */
-#define REMOTE_KEY_COUNT    10U
-
-/* 按键枚举（跟遥控协议.md 的 enum 顺序一致，对应字节位图 [0..9]） */
-typedef enum {
-    REMOTE_KEY_UP    = 0,   /* KeyUp    方向上 */
-    REMOTE_KEY_DOWN  = 1,   /* KeyDown  方向下 */
-    REMOTE_KEY_LEFT  = 2,   /* KeyLeft  方向左 */
-    REMOTE_KEY_RIGHT = 3,   /* KeyRight 方向右 */
-    REMOTE_KEY_Y     = 4,
-    REMOTE_KEY_A     = 5,
-    REMOTE_KEY_X     = 6,
-    REMOTE_KEY_B     = 7,
-    REMOTE_KEY_R1    = 8,   /* R1Key */
-    REMOTE_KEY_L1    = 9,   /* L1Key */
-} Bsp_RemoteKey_t;
 
 /** 初始化 USART1 9600 8N1 + DMA 收 + IDLE，PF3 下拉输入 */
 void Bsp_UartBle_Init(void);

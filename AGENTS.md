@@ -1,6 +1,8 @@
 # AGENTS.md — 小白-Ai 主控固件
 
-「小白-Ai」AI 玩具小车的主控 MCU 固件（STM32 风格裸机程序）。主控为普冉 PY32F030K28U6TR（Cortex-M0+，Flash 32KB，RAM 4KB），语音识别（ASRPRO 串口协议 v0.7）、BLE 遥控、4 种玩法模式（语音/动力/感应/遥控）。Git：远程 `origin` = `https://github.com/MrHuang-0110/LBS-XIAOBAI-AI.git`，默认分支 `main`；`.gitignore` 已排除 Keil 构建产物，**提交前用 `git status` 确认无 `MDK-ARM/Output`、`*.o/*.hex/*.map` 等产物入库**。
+「小白-Ai」AI 玩具小车的主控 MCU 固件（STM32 风格裸机程序）。主控为普冉 PY32F030K28U6TR（Cortex-M0+，Flash 32KB，RAM 4KB），语音识别（ASRPRO 串口协议 v0.7）、BLE 遥控、4 种玩法模式（语音/动力/感应/遥控）。Git：远程 `origin` = `https://github.com/MrHuang-0110/LBS-XIAOBAI-AI.git`，`.gitignore` 已排除 Keil 构建产物，**提交前用 `git status` 确认无 `MDK-ARM/Output`、`*.o/*.hex/*.map` 等产物入库**。
+
+**分支工作流（强制）**：日常开发、维护、功能迭代一律在 `main-work` 分支上进行（当前工作分支）；`main` 只接收 `main-work` 的合并结果，不在 main 上直接开发。完成一个功能/里程碑后：`git checkout main` → `git merge main-work` → 推送，然后切回 `main-work` 继续开发。
 
 项目记忆库在 `doc/`（`doc/README.md` 为索引：框架/技术栈/踩坑/进度）。**task 开始前先读相关记忆，task 结束后必须更新。**
 
@@ -24,7 +26,8 @@
 
 ## Architecture
 
-- `User/main.c` — 唯一应用层，约 28KB：4 模式状态机（`App_Mode_t`）、主循环 `while(1)` 轮询按键/语音事件、LED 映射与 TM1640 眼睛动画、关机/低电量流程。入口 `main()` = `HAL_Init()` → `APP_SystemClockConfig()` → `BSP_Init()` → 模式循环
+- `User/` — 应用层：入口 `main.c`（5 行，仅 `HAL_Init()` → `App_System_Init()` → `BSP_Init()` → `App_Init()` → `App_Loop()`）+ `App_Main.c` 主循环调度 + 各职责模块（`App_Mode*` 模式状态机 / `App_Vehicle` 车辆动作 / `App_Eye` 眼睛 / `App_Breath` 呼吸 / `App_Shutdown` 关机 / `App_Battery` 电池 / `App_System` 时钟）
+- `Protocol/` — 协议层：`Proto_Asr`（语音协议 ID 宏 + `cmd_to_voice` 权威映射）、`Proto_Remote`（遥控帧校验 + 按键位图解析）
 - `BSP_Drivers/` — 板级驱动，每个外设一个子目录（`Bsp_Tick/Led/Power/LedPwm/Key/Motor/Adc/IR/Battery/UartAsr/UartBle/Tm1640`）；`Bsp.c` 的 `BSP_Init()` 按固定顺序汇总初始化（电源锁存失败 `while(1)` 死循环）
 - `PY32F0xx_HAL_Driver/` — 普冉官方 HAL/LL 库（`Inc`/`Src`），供应商代码，一般不改
 - `CMSIS/` — ARM CMSIS 头文件、DSP Lib、启动文件 `Device/PY32F0xx/Source/arm/startup_py32f030x6.s`
@@ -34,12 +37,13 @@
 ## Conventions
 
 - 注释用中文（含需求背景、日期、坑），代码/标识符用英文；关键决策处写清"为什么"
-- BSP 命名：函数 `Bsp_<模块>_<动作>`（`Bsp_UartAsr_SendPlay`）、类型 `Bsp_Xxx_Type_t`、枚举值大写（`ASR_CMD_*`、`KEY_EVT_*`）；头文件 include guard `__BSP_X_H`
+- BSP 命名：函数 `Bsp_<模块>_<动作>`（`Bsp_UartAsr_SendPlay`）、类型 `Bsp_Xxx_Type_t`、枚举值大写（`KEY_EVT_*` 等）；头文件 include guard `__BSP_X_H`；协议 ID 宏（`ASR_CMD_*`/`ASR_VOICE_*`/`REMOTE_*`）统一放 `Protocol/Proto_*.h`
 - 只依赖 HAL 标准 API（`HAL_UART_Transmit` 等），新增外设驱动时在 `BSP_Drivers/Bsp_<X>/` 建子目录并加入 `Bsp.h` 汇总 include 和 Keil 工程
 - 裸机非阻塞：时间基准用 `Bsp_Tick_GetMs()`/`Bsp_Tick_DelayMs()`；事件靠主循环轮询（`Bsp_Key_Poll`、`Bsp_UartAsr_TryRecv`）+ 中断置标志，禁止长阻塞
 - 状态用 `static const` 查表驱动（`mode_led[]`、`cmd_to_voice[]` 等），枚举与表顺序严格对齐
-- 语音协议版本 v0.7：命令 ID 1-16、播报 ID 17-41 不重叠；改 ID 必须同步核对 `cmd_to_voice` 映射表和 `Bsp_UartAsr.h` 宏
+- 语音协议版本 v0.7：命令 ID 1-16、播报 ID 17-41 不重叠；改 ID 必须同步核对 `Protocol/Proto_Asr.h` 宏和 `Protocol/Proto_Asr.c` 的 `cmd_to_voice` 表（权威映射）
 - 新增 BSP 时在 `MDK-ARM/XiaoBai.uvprojx` 的 `Bsp_Drivers` Group 里加 `<File>` 条目，否则编译不过
+- 新增协议模块时在 `Protocol/` 建文件并加入 `MDK-ARM/XiaoBai.uvprojx` 的 `Protocol` Group（同理 Bsp_UartAsr 等驱动只做字节收发，不做协议解析）
 - 资源紧张（32KB Flash / 4KB RAM）：警惕大数组与 `printf` 全家桶
 - 外部文档在工作区外：`../docs/plan-bsp-v1.md`、`../resource/小白IO分配.xlsx`、`../resource/语音芯片交互协议.md`（代码注释中以 `resource/` 相对引用）
 
