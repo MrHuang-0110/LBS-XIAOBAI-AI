@@ -1,0 +1,30 @@
+# ===== Keil MDK-ARM 构建产物 =====
+MDK-ARM/Output/
+MDK-ARM/*.uvguix.*
+MDK-ARM/EventRecorderStub.scvd
+*.uvoptx
+
+# 编译中间文件（全仓库兜底）
+*.o
+*.crf
+*.d
+*.lst
+*.lnp
+*.dep
+*.iex
+*.sct
+*.build_log.htm
+
+# 烧录/链接产物
+*.axf
+*.hex
+*.map
+*.htm
+
+# RTE 运行时生成
+RTE/
+
+# 系统/编辑器
+Thumbs.db
+.DS_Store
+*.swp
