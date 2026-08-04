@@ -8,6 +8,7 @@
 #include "App_Mode_Power.h"
 #include "App_Mode_Sensor.h"
 #include "App_Mode_Remote.h"
+#include "App_Mode_Voice.h"
 
 /* ===== TM1640 眼睛图案（8×14 点阵，左眼列0-6 / 右眼列7-13，各 7×8）=====
    椭圆形空心轮廓，眨眼=行3一条横线。 */
@@ -209,24 +210,8 @@ int main(void)
                         }
                     }
                     /* 段3: 仅语音模式响应（动作命令 11 条） */
-                    else if (App_Mode_Get() == APP_MODE_VOICE &&
-                             e.arg >= ASR_CMD_FORWARD && e.arg <= ASR_CMD_R_STOP) {
-                        /* 统一回播规则：MCU 实际动作 → 对应播报语 */
-                        Bsp_UartAsr_SendPlay(Proto_Asr_CmdToVoice(e.arg));
-                        switch (e.arg) {
-                        case ASR_CMD_FORWARD:  Vehicle_Drive(VEHICLE_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_BACKWARD: Vehicle_Drive(VEHICLE_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_LEFT:     Vehicle_Drive(VEHICLE_DIR_LEFT,     MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_RIGHT:    Vehicle_Drive(VEHICLE_DIR_RIGHT,    MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_STOP:     Vehicle_Drive(VEHICLE_DIR_STOP,     MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_L_FWD:  Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_L_REV:  Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_L_STOP: Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_STOP,     MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_R_FWD:  Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_R_REV:  Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_R_STOP: Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_STOP,     MOTOR_SPEED_HIGH); break;
-                        default: break;
-                        }
+                    else if (e.arg >= ASR_CMD_FORWARD && e.arg <= ASR_CMD_R_STOP) {
+                        App_Mode_Voice_OnCmd(e.arg);
                     }
                 }
                 else if (e.type == ASR_EVT_WAKE) {

@@ -444,6 +444,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\App_Mode_Remote.c</FilePath>
             </File>
+            <File>
+              <FileName>App_Mode_Voice.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Mode_Voice.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
