@@ -4,25 +4,10 @@
 #include "Bsp.h"
 #include "Proto_Asr.h"
 #include "Proto_Remote.h"
-
-/* ===== 模式与动作枚举 ===== */
-typedef enum {
-    APP_MODE_VOICE  = 0,
-    APP_MODE_POWER  = 1,
-    APP_MODE_SENSOR = 2,
-    APP_MODE_REMOTE = 3,
-    APP_MODE_COUNT
-} App_Mode_t;
-
-/* 动力模式的 5 个动作（文档 §8）*/
-typedef enum {
-    POWER_ACT_STOP  = 0,
-    POWER_ACT_FWD   = 1,
-    POWER_ACT_BACK  = 2,
-    POWER_ACT_LEFT  = 3,
-    POWER_ACT_RIGHT = 4,
-    POWER_ACT_COUNT
-} Power_Action_t;
+#include "App_Mode.h"
+#include "App_Mode_Power.h"
+#include "App_Mode_Sensor.h"
+#include "App_Mode_Remote.h"
 
 /* 感应模式的 4 个玩法（文档 §9）*/
 typedef enum {
@@ -37,26 +22,6 @@ typedef enum {
    方案A硬编码，量产不需要用户校准。 */
 #define IR_THRESHOLD  3000U
 
-/* 模式 -> 对应 LED（KEY-LED 一一对应，2026-07-06 变更）：
-     语音->LED1 / 感应->LED2 / 遥控->LED4 / 动力->LED3
-   注：Bsp_Led 枚举名 LED_MODE_POWER 实际是 LED1(PB2)，LED_MODE_VOICE 是 LED4(PA12)，
-   名称跟模式不对应，但 mode_led[] 按物理 LED 映射，逻辑正确。 */
-static const Bsp_Led_Id_t mode_led[APP_MODE_COUNT] = {
-    LED_MODE_POWER,   /* APP_MODE_VOICE  -> LED1 */
-    LED_MODE_REMOTE,  /* APP_MODE_POWER  -> LED3 */
-    LED_MODE_SENSOR,  /* APP_MODE_SENSOR -> LED2 */
-    LED_MODE_VOICE,   /* APP_MODE_REMOTE -> LED4 */
-};
-/* 模式 -> 进入时播报的语音 ID */
-static const uint8_t mode_voice[APP_MODE_COUNT] = {
-    ASR_VOICE_ENTER_VOICE, ASR_VOICE_ENTER_POWER,
-    ASR_VOICE_ENTER_SENSOR, ASR_VOICE_ENTER_REMOTE,
-};
-/* 动力动作 -> 语音 ID（文档 §7）*/
-static const uint8_t act_voice[POWER_ACT_COUNT] = {
-    ASR_VOICE_STOP, ASR_VOICE_FORWARD, ASR_VOICE_BACKWARD,
-    ASR_VOICE_LEFT, ASR_VOICE_RIGHT,
-};
 /* 感应玩法 -> 语音 ID（文档 §7）*/
 static const uint8_t sensor_voice[SENSOR_PLAY_COUNT] = {
     ASR_VOICE_APPROACH_GO, ASR_VOICE_OBSTACLE_STOP,
@@ -89,12 +54,9 @@ static const struct { uint16_t ms; uint8_t pos; } look_seq[] = {
 #define LOOK_LEN (sizeof(look_seq)/sizeof(look_seq[0]))
 
 /* ===== 全局状态 ===== */
-static App_Mode_t      g_mode;
-static Power_Action_t  g_power_action = POWER_ACT_STOP;
 static Sensor_Play_t   g_sensor_play = SENSOR_PLAY_APPROACH;
 static uint8_t         g_wave_on = 0;            /* 挥手开关的当前开/关状态 */
 static uint8_t         g_ir1_was = 0, g_ir2_was = 0, g_ir3_was = 0;  /* 挥手边沿检测 */
-static uint8_t         g_mode_paused = 0;        /* 1=进入模式后暂停，第二次按键才启动 */
 
 /* 遥控模式状态 */
 static Bsp_Motor_Speed_t g_remote_speed = MOTOR_SPEED_MID;  /* 3 档速度，默认 2 档 70% */
@@ -137,37 +99,6 @@ static void PerformShutdown(void)
     Bsp_Tick_DelayMs(1000);
     Bsp_Power_ShutDown();
 }
-
-/* 切模式：停电机 + 点 LED + 可选播报。
- * play_voice=1（按键 / 语音命令 cmd=2..5 / 模式内子动作）：播"进入 XX 模式"，
- *             与"MCU 实际动作 → SendPlay"统一规则一致。
- * play_voice=0（开机默认进入语音模式）：静默，开机语已由 Bsp_UartAsr_SendPlay(ASR_VOICE_BOOT) 单独发，
- *             避免与 BOOT 合并句重复。 */
-static void SwitchMode(App_Mode_t new_mode, uint8_t play_voice)
-{
-    if (new_mode >= APP_MODE_COUNT) return;
-    Bsp_Motor_StopAll();
-    g_mode = new_mode;
-    Bsp_Led_AllOff();
-    Bsp_Led_On(mode_led[g_mode]);
-    if (new_mode == APP_MODE_REMOTE) {
-        g_remote_speed = MOTOR_SPEED_MID;  /* 进遥控模式默认 2 档 70% */
-    }
-    if (new_mode == APP_MODE_SENSOR) {
-        g_sensor_play = SENSOR_PLAY_APPROACH;  /* 进感应模式默认玩法1 */
-        g_wave_on = 0;
-        g_ir1_was = 0;
-        g_ir3_was = 0;
-    }
-    if (new_mode == APP_MODE_POWER || new_mode == APP_MODE_SENSOR) {
-        g_mode_paused = 1;   /* 进入模式后暂停，第二次按键才启动 */
-    }
-    if (play_voice) {
-        Bsp_UartAsr_SendPlay(mode_voice[g_mode]);
-        /* 不等 done，异步播报，保证按键灵敏（跟感应模式一致）*/
-    }
-}
-
 
 /* TM1640 眼睛动画：椭圆空心轮廓。
    未连接 → 双眨（灵动）
@@ -234,9 +165,9 @@ int main(void)
     /* 应用层时序：等 ASRPRO 启动 + 默认进入语音模式 */
     Bsp_Tick_DelayMs(1500);
     /* v0.7 ID 17 = "你好呀我是小白进入语音模式"，本身就是合并句，
-       单独播；SwitchMode 用 play_voice=0 静默切避免重复 */
+       单独播；App_Mode_Switch 用 play_voice=0 静默切避免重复 */
     Bsp_UartAsr_SendPlay(ASR_VOICE_BOOT);
-    SwitchMode(APP_MODE_VOICE, 0);
+    App_Mode_Switch(APP_MODE_VOICE, 0);
 
     /* PA9 呼吸灯默认关闭，由 wake 唤醒启动 / 15s 超时自动关 */
     Bsp_LedPwm_Set(LEDPWM_1, 0);
@@ -262,11 +193,11 @@ int main(void)
             Bsp_Key_Evt_t ke = Bsp_Key_Poll(&kid);
             if (ke == KEY_EVT_SHORT) {
                 switch (kid) {
-                case KEY_ID_1: SwitchMode(APP_MODE_VOICE, 1);  break;  /* LED1 */
+                case KEY_ID_1: App_Mode_Switch(APP_MODE_VOICE, 1);  break;  /* LED1 */
                 case KEY_ID_2:  /* LED2 感应模式：已在感应模式则切玩法 */
-                    if (g_mode == APP_MODE_SENSOR) {
-                        if (g_mode_paused) {
-                            g_mode_paused = 0;   /* 第一次按键：启动第一个玩法 */
+                    if (App_Mode_Get() == APP_MODE_SENSOR) {
+                        if (App_Mode_IsPaused()) {
+                            App_Mode_SetPaused(0);   /* 第一次按键：启动第一个玩法 */
                             Bsp_UartAsr_SendPlay(sensor_voice[g_sensor_play]);
                         } else {
                             g_sensor_play = (Sensor_Play_t)((g_sensor_play + 1) % SENSOR_PLAY_COUNT);
@@ -275,23 +206,15 @@ int main(void)
                             Bsp_UartAsr_SendPlay(sensor_voice[g_sensor_play]);
                         }
                     } else {
-                        SwitchMode(APP_MODE_SENSOR, 1);
+                        App_Mode_Switch(APP_MODE_SENSOR, 1);
                     }
                     break;
-                case KEY_ID_3: SwitchMode(APP_MODE_REMOTE, 1); break;  /* LED3 */
+                case KEY_ID_3: App_Mode_Switch(APP_MODE_REMOTE, 1); break;  /* LED3 */
                 case KEY_ID_4:  /* LED4 动力模式：已在动力模式则切动作 */
-                    if (g_mode == APP_MODE_POWER) {
-                        if (g_mode_paused) {
-                            g_mode_paused = 0;                       /* 第一次按键：启动 */
-                            g_power_action = POWER_ACT_FWD;          /* 从前进开始 */
-                        } else {
-                            g_power_action = (Power_Action_t)((g_power_action + 1) % POWER_ACT_COUNT);
-                        }
-                        Bsp_Motor_StopAll();
-                        Bsp_UartAsr_SendPlay(act_voice[g_power_action]);
-                         
+                    if (App_Mode_Get() == APP_MODE_POWER) {
+                        App_Mode_Power_OnKey();
                     } else {
-                        SwitchMode(APP_MODE_POWER, 1);
+                        App_Mode_Switch(APP_MODE_POWER, 1);
                     }
                     break;
                 default: break;
@@ -315,14 +238,14 @@ int main(void)
                     /* 段2: 任何模式响应（切模式 4 选 1） */
                     else if (e.arg >= ASR_CMD_ENTER_POWER && e.arg <= ASR_CMD_ENTER_VOICE) {
                         switch (e.arg) {
-                        case ASR_CMD_ENTER_POWER:  SwitchMode(APP_MODE_POWER, 1);  break;
-                        case ASR_CMD_ENTER_SENSOR: SwitchMode(APP_MODE_SENSOR, 1); break;
-                        case ASR_CMD_ENTER_REMOTE: SwitchMode(APP_MODE_REMOTE, 1); break;
-                        case ASR_CMD_ENTER_VOICE:  SwitchMode(APP_MODE_VOICE, 1);  break;
+                        case ASR_CMD_ENTER_POWER:  App_Mode_Switch(APP_MODE_POWER, 1);  break;
+                        case ASR_CMD_ENTER_SENSOR: App_Mode_Switch(APP_MODE_SENSOR, 1); break;
+                        case ASR_CMD_ENTER_REMOTE: App_Mode_Switch(APP_MODE_REMOTE, 1); break;
+                        case ASR_CMD_ENTER_VOICE:  App_Mode_Switch(APP_MODE_VOICE, 1);  break;
                         }
                     }
                     /* 段3: 仅语音模式响应（动作命令 11 条） */
-                    else if (g_mode == APP_MODE_VOICE &&
+                    else if (App_Mode_Get() == APP_MODE_VOICE &&
                              e.arg >= ASR_CMD_FORWARD && e.arg <= ASR_CMD_R_STOP) {
                         /* 统一回播规则：MCU 实际动作 → 对应播报语 */
                         Bsp_UartAsr_SendPlay(Proto_Asr_CmdToVoice(e.arg));
@@ -375,7 +298,7 @@ int main(void)
             Proto_Remote_Feed(buf, n);
             uint8_t keys[REMOTE_KEY_COUNT];
             while (Proto_Remote_GetFrame(keys)) {
-                if (g_mode == APP_MODE_REMOTE) {
+                if (App_Mode_Get() == APP_MODE_REMOTE) {
                     /* 肩键调速（边沿触发）：R1=速度+，L1=速度- */
                     if (keys[REMOTE_KEY_R1] && !g_r1_was) {
                         if (g_remote_speed < MOTOR_SPEED_HIGH) g_remote_speed++;
@@ -431,18 +354,10 @@ int main(void)
         }
 
         /* --- 动力模式电机驱动（主循环持续驱动，跟感应模式架构一致）--- */
-        if (g_mode == APP_MODE_POWER && !g_mode_paused) {
-            switch (g_power_action) {
-            case POWER_ACT_STOP:  Vehicle_Drive(VEHICLE_DIR_STOP,     MOTOR_SPEED_HIGH); break;
-            case POWER_ACT_FWD:   Vehicle_Drive(VEHICLE_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
-            case POWER_ACT_BACK:  Vehicle_Drive(VEHICLE_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
-            case POWER_ACT_LEFT:  Vehicle_Drive(VEHICLE_DIR_LEFT,     MOTOR_SPEED_HIGH); break;
-            case POWER_ACT_RIGHT: Vehicle_Drive(VEHICLE_DIR_RIGHT,    MOTOR_SPEED_HIGH); break;
-            }
-        }
+        App_Mode_Power_Update();
 
         /* --- 感应模式执行（文档 §9）--- */
-        if (g_mode == APP_MODE_SENSOR && !g_mode_paused) {
+        if (App_Mode_Get() == APP_MODE_SENSOR && !App_Mode_IsPaused()) {
             uint16_t ir1 = Bsp_IR_ReadCh1();
             uint16_t ir2 = Bsp_IR_ReadCh2();
             uint16_t ir3 = Bsp_IR_ReadCh3();
@@ -505,7 +420,7 @@ int main(void)
 
         /* --- 遥控模式超时停机（1s 没收到帧才停，防断连电机狂转；
                正常遥控器持续发帧间隔远小于 1s，不会误触发）--- */
-        if (g_mode == APP_MODE_REMOTE &&
+        if (App_Mode_Get() == APP_MODE_REMOTE &&
             g_last_remote_frame != 0 &&
             (Bsp_Tick_GetMs() - g_last_remote_frame > 1000)) {
             Bsp_Motor_StopAll();
