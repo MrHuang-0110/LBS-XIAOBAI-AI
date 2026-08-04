@@ -1,6 +1,5 @@
 #ifndef __APP_MODE_POWER_H
 #define __APP_MODE_POWER_H
-#include <stdint.h>
 
 /** KEY4 在动力模式内的动作切换（第二次按键起逐档轮换，首按启动前进） */
 void App_Mode_Power_OnKey(void);

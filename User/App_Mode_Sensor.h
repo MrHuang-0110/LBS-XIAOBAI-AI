@@ -1,6 +1,5 @@
 #ifndef __APP_MODE_SENSOR_H
 #define __APP_MODE_SENSOR_H
-#include <stdint.h>
 
 /** 进入感应模式时重置：玩法1（靠近启动）、挥手关、清边沿状态 */
 void App_Mode_Sensor_Enter(void);
