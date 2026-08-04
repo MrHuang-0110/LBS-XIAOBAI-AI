@@ -1,6 +1,8 @@
 # AGENTS.md — 小白-Ai 主控固件
 
-「小白-Ai」AI 玩具小车的主控 MCU 固件（STM32 风格裸机程序）。主控为普冉 PY32F030K28U6TR（Cortex-M0+，Flash 32KB，RAM 4KB），语音识别（ASRPRO 串口协议 v0.7）、BLE 遥控、4 种玩法模式（语音/动力/感应/遥控）。Git：远程 `origin` = `https://github.com/MrHuang-0110/LBS-XIAOBAI-AI.git`，默认分支 `main`；`.gitignore` 已排除 Keil 构建产物，**提交前用 `git status` 确认无 `MDK-ARM/Output`、`*.o/*.hex/*.map` 等产物入库**。
+「小白-Ai」AI 玩具小车的主控 MCU 固件（STM32 风格裸机程序）。主控为普冉 PY32F030K28U6TR（Cortex-M0+，Flash 32KB，RAM 4KB），语音识别（ASRPRO 串口协议 v0.7）、BLE 遥控、4 种玩法模式（语音/动力/感应/遥控）。Git：远程 `origin` = `https://github.com/MrHuang-0110/LBS-XIAOBAI-AI.git`，`.gitignore` 已排除 Keil 构建产物，**提交前用 `git status` 确认无 `MDK-ARM/Output`、`*.o/*.hex/*.map` 等产物入库**。
+
+**分支工作流（强制）**：日常开发、维护、功能迭代一律在 `main-work` 分支上进行（当前工作分支）；`main` 只接收 `main-work` 的合并结果，不在 main 上直接开发。完成一个功能/里程碑后：`git checkout main` → `git merge main-work` → 推送，然后切回 `main-work` 继续开发。
 
 项目记忆库在 `doc/`（`doc/README.md` 为索引：框架/技术栈/踩坑/进度）。**task 开始前先读相关记忆，task 结束后必须更新。**
 
