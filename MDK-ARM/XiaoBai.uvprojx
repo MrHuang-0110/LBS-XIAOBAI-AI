@@ -414,6 +414,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\py32f0xx_hal_msp.c</FilePath>
             </File>
+            <File>
+              <FileName>App_System.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_System.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
