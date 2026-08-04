@@ -1,5 +1,6 @@
 #include "main.h"
 #include "App_System.h"
+#include "App_Vehicle.h"
 #include "Bsp.h"
 #include "Proto_Asr.h"
 #include "Proto_Remote.h"
@@ -326,31 +327,17 @@ int main(void)
                         /* 统一回播规则：MCU 实际动作 → 对应播报语 */
                         Bsp_UartAsr_SendPlay(Proto_Asr_CmdToVoice(e.arg));
                         switch (e.arg) {
-                        case ASR_CMD_FORWARD:
-                            Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH);
-                            Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH);
-                            break;
-                        case ASR_CMD_BACKWARD:
-                            Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH);
-                            Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH);
-                            break;
-                        case ASR_CMD_LEFT:
-                            Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH);
-                            Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH);
-                            break;
-                        case ASR_CMD_RIGHT:
-                            Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH);
-                            Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH);
-                            break;
-                        case ASR_CMD_STOP:
-                            Bsp_Motor_StopAll();
-                            break;
-                        case ASR_CMD_L_FWD:  Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_L_REV:  Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_L_STOP: Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_STOP,     MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_R_FWD:  Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_R_REV:  Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
-                        case ASR_CMD_R_STOP: Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_STOP,     MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_FORWARD:  Vehicle_Drive(VEHICLE_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_BACKWARD: Vehicle_Drive(VEHICLE_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_LEFT:     Vehicle_Drive(VEHICLE_DIR_LEFT,     MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_RIGHT:    Vehicle_Drive(VEHICLE_DIR_RIGHT,    MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_STOP:     Vehicle_Drive(VEHICLE_DIR_STOP,     MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_L_FWD:  Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_L_REV:  Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_L_STOP: Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_STOP,     MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_R_FWD:  Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_R_REV:  Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
+                        case ASR_CMD_R_STOP: Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_STOP,     MOTOR_SPEED_HIGH); break;
                         default: break;
                         }
                     }
@@ -400,25 +387,21 @@ int main(void)
                     g_l1_was = keys[REMOTE_KEY_L1];
                     /* 方向键优先（坦克转向），否则单电机键 */
                     if (keys[REMOTE_KEY_UP]) {
-                        Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  g_remote_speed);
-                        Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  g_remote_speed);
+                        Vehicle_Drive(VEHICLE_DIR_FORWARD, g_remote_speed);
                     } else if (keys[REMOTE_KEY_DOWN]) {
-                        Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, g_remote_speed);
-                        Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, g_remote_speed);
+                        Vehicle_Drive(VEHICLE_DIR_BACKWARD, g_remote_speed);
                     } else if (keys[REMOTE_KEY_LEFT]) {
-                        Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, g_remote_speed);
-                        Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  g_remote_speed);
+                        Vehicle_Drive(VEHICLE_DIR_LEFT, g_remote_speed);
                     } else if (keys[REMOTE_KEY_RIGHT]) {
-                        Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  g_remote_speed);
-                        Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, g_remote_speed);
+                        Vehicle_Drive(VEHICLE_DIR_RIGHT, g_remote_speed);
                     } else {
                         /* 单电机：Y=L正转 A=L反转 X=R正转 B=R反转 */
-                        if (keys[REMOTE_KEY_Y])      Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  g_remote_speed);
-                        else if (keys[REMOTE_KEY_A]) Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, g_remote_speed);
-                        else                         Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_STOP,     g_remote_speed);
-                        if (keys[REMOTE_KEY_X])      Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  g_remote_speed);
-                        else if (keys[REMOTE_KEY_B]) Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, g_remote_speed);
-                        else                         Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_STOP,     g_remote_speed);
+                        if (keys[REMOTE_KEY_Y])      Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  g_remote_speed);
+                        else if (keys[REMOTE_KEY_A]) Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, g_remote_speed);
+                        else                         Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_STOP,     g_remote_speed);
+                        if (keys[REMOTE_KEY_X])      Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  g_remote_speed);
+                        else if (keys[REMOTE_KEY_B]) Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, g_remote_speed);
+                        else                         Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_STOP,     g_remote_speed);
                     }
                     g_last_remote_frame = Bsp_Tick_GetMs();
                 }
@@ -450,26 +433,11 @@ int main(void)
         /* --- 动力模式电机驱动（主循环持续驱动，跟感应模式架构一致）--- */
         if (g_mode == APP_MODE_POWER && !g_mode_paused) {
             switch (g_power_action) {
-            case POWER_ACT_STOP:
-                Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_STOP,     MOTOR_SPEED_HIGH);
-                Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_STOP,     MOTOR_SPEED_HIGH);
-                break;
-            case POWER_ACT_FWD:
-                Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH);
-                Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH);
-                break;
-            case POWER_ACT_BACK:
-                Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH);
-                Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH);
-                break;
-            case POWER_ACT_LEFT:
-                Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH);
-                Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH);
-                break;
-            case POWER_ACT_RIGHT:
-                Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH);
-                Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, MOTOR_SPEED_HIGH);
-                break;
+            case POWER_ACT_STOP:  Vehicle_Drive(VEHICLE_DIR_STOP,     MOTOR_SPEED_HIGH); break;
+            case POWER_ACT_FWD:   Vehicle_Drive(VEHICLE_DIR_FORWARD,  MOTOR_SPEED_HIGH); break;
+            case POWER_ACT_BACK:  Vehicle_Drive(VEHICLE_DIR_BACKWARD, MOTOR_SPEED_HIGH); break;
+            case POWER_ACT_LEFT:  Vehicle_Drive(VEHICLE_DIR_LEFT,     MOTOR_SPEED_HIGH); break;
+            case POWER_ACT_RIGHT: Vehicle_Drive(VEHICLE_DIR_RIGHT,    MOTOR_SPEED_HIGH); break;
             }
         }
 
@@ -486,19 +454,17 @@ int main(void)
             case SENSOR_PLAY_APPROACH:
                 /* 靠近启动：有物体前进，无物体停 */
                 if (ir2_trig) {
-                    Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD, MOTOR_SPEED_MID);
-                    Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD, MOTOR_SPEED_MID);
+                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_MID);
                 } else {
-                    Bsp_Motor_StopAll();
+                    Vehicle_Drive(VEHICLE_DIR_STOP, MOTOR_SPEED_MID);
                 }
                 break;
             case SENSOR_PLAY_OBSTACLE:
                 /* 遇障停止：前进，遇障碍停 */
                 if (ir2_trig) {
-                    Bsp_Motor_StopAll();
+                    Vehicle_Drive(VEHICLE_DIR_STOP, MOTOR_SPEED_MID);
                 } else {
-                    Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD, MOTOR_SPEED_MID);
-                    Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD, MOTOR_SPEED_MID);
+                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_MID);
                 }
                 break;
             case SENSOR_PLAY_WAVE:
@@ -514,25 +480,21 @@ int main(void)
                     }
                 }
                 if (g_wave_on) {
-                    Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD, MOTOR_SPEED_MID);
-                    Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD, MOTOR_SPEED_MID);
+                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_MID);
                 } else {
-                    Bsp_Motor_StopAll();
+                    Vehicle_Drive(VEHICLE_DIR_STOP, MOTOR_SPEED_MID);
                 }
                 break;
             case SENSOR_PLAY_BRIGHTNESS:
                 /* 明暗调速：反射越强（值越小）速度越快 */
                 if (ir2 < 500) {
-                    Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD, MOTOR_SPEED_HIGH);
-                    Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD, MOTOR_SPEED_HIGH);
+                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_HIGH);
                 } else if (ir2 < 1000) {
-                    Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD, MOTOR_SPEED_MID);
-                    Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD, MOTOR_SPEED_MID);
+                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_MID);
                 } else if (ir2 < IR_THRESHOLD) {
-                    Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD, MOTOR_SPEED_LOW);
-                    Bsp_Motor_Set(MOTOR_RIGHT, MOTOR_DIR_FORWARD, MOTOR_SPEED_LOW);
+                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_LOW);
                 } else {
-                    Bsp_Motor_StopAll();
+                    Vehicle_Drive(VEHICLE_DIR_STOP, MOTOR_SPEED_MID);
                 }
                 break;
             }

@@ -419,6 +419,11 @@
               <FileType>1</FileType>
               <FilePath>..\User\App_System.c</FilePath>
             </File>
+            <File>
+              <FileName>App_Vehicle.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Vehicle.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
