@@ -9,25 +9,6 @@
 #include "App_Mode_Sensor.h"
 #include "App_Mode_Remote.h"
 
-/* 感应模式的 4 个玩法（文档 §9）*/
-typedef enum {
-    SENSOR_PLAY_APPROACH   = 0,  /* 靠近启动 */
-    SENSOR_PLAY_OBSTACLE   = 1,  /* 遇障停止 */
-    SENSOR_PLAY_WAVE       = 2,  /* 挥手开关 */
-    SENSOR_PLAY_BRIGHTNESS = 3,  /* 明暗调速 */
-    SENSOR_PLAY_COUNT
-} Sensor_Play_t;
-
-/* 红外反射阈值：ADC < 3000 = 有反射（遮挡时~200，无反射~4000）。
-   方案A硬编码，量产不需要用户校准。 */
-#define IR_THRESHOLD  3000U
-
-/* 感应玩法 -> 语音 ID（文档 §7）*/
-static const uint8_t sensor_voice[SENSOR_PLAY_COUNT] = {
-    ASR_VOICE_APPROACH_GO, ASR_VOICE_OBSTACLE_STOP,
-    ASR_VOICE_WAVE_TOGGLE, ASR_VOICE_BRIGHTNESS,
-};
-
 /* ===== TM1640 眼睛图案（8×14 点阵，左眼列0-6 / 右眼列7-13，各 7×8）=====
    椭圆形空心轮廓，眨眼=行3一条横线。 */
 static const uint8_t eye_box[14] = {
@@ -54,15 +35,6 @@ static const struct { uint16_t ms; uint8_t pos; } look_seq[] = {
 #define LOOK_LEN (sizeof(look_seq)/sizeof(look_seq[0]))
 
 /* ===== 全局状态 ===== */
-static Sensor_Play_t   g_sensor_play = SENSOR_PLAY_APPROACH;
-static uint8_t         g_wave_on = 0;            /* 挥手开关的当前开/关状态 */
-static uint8_t         g_ir1_was = 0, g_ir2_was = 0, g_ir3_was = 0;  /* 挥手边沿检测 */
-
-/* 遥控模式状态 */
-static Bsp_Motor_Speed_t g_remote_speed = MOTOR_SPEED_MID;  /* 3 档速度，默认 2 档 70% */
-static uint32_t          g_last_remote_frame = 0;           /* 超时停机计时 */
-static uint8_t           g_r1_was = 0, g_l1_was = 0;        /* 肩键边沿检测 */
-
 /* 呼吸灯状态（PA9，由 wake 唤醒启动，15s 超时自动关闭） */
 static uint8_t  g_breathing = 0;       /* 1=呼吸中 0=关闭 */
 static int16_t  g_breath_val = 0;
@@ -196,15 +168,7 @@ int main(void)
                 case KEY_ID_1: App_Mode_Switch(APP_MODE_VOICE, 1);  break;  /* LED1 */
                 case KEY_ID_2:  /* LED2 感应模式：已在感应模式则切玩法 */
                     if (App_Mode_Get() == APP_MODE_SENSOR) {
-                        if (App_Mode_IsPaused()) {
-                            App_Mode_SetPaused(0);   /* 第一次按键：启动第一个玩法 */
-                            Bsp_UartAsr_SendPlay(sensor_voice[g_sensor_play]);
-                        } else {
-                            g_sensor_play = (Sensor_Play_t)((g_sensor_play + 1) % SENSOR_PLAY_COUNT);
-                            Bsp_Motor_StopAll();
-                            g_wave_on = 0;
-                            Bsp_UartAsr_SendPlay(sensor_voice[g_sensor_play]);
-                        }
+                        App_Mode_Sensor_OnKey();
                     } else {
                         App_Mode_Switch(APP_MODE_SENSOR, 1);
                     }
@@ -298,36 +262,7 @@ int main(void)
             Proto_Remote_Feed(buf, n);
             uint8_t keys[REMOTE_KEY_COUNT];
             while (Proto_Remote_GetFrame(keys)) {
-                if (App_Mode_Get() == APP_MODE_REMOTE) {
-                    /* 肩键调速（边沿触发）：R1=速度+，L1=速度- */
-                    if (keys[REMOTE_KEY_R1] && !g_r1_was) {
-                        if (g_remote_speed < MOTOR_SPEED_HIGH) g_remote_speed++;
-                    }
-                    if (keys[REMOTE_KEY_L1] && !g_l1_was) {
-                        if (g_remote_speed > MOTOR_SPEED_LOW) g_remote_speed--;
-                    }
-                    g_r1_was = keys[REMOTE_KEY_R1];
-                    g_l1_was = keys[REMOTE_KEY_L1];
-                    /* 方向键优先（坦克转向），否则单电机键 */
-                    if (keys[REMOTE_KEY_UP]) {
-                        Vehicle_Drive(VEHICLE_DIR_FORWARD, g_remote_speed);
-                    } else if (keys[REMOTE_KEY_DOWN]) {
-                        Vehicle_Drive(VEHICLE_DIR_BACKWARD, g_remote_speed);
-                    } else if (keys[REMOTE_KEY_LEFT]) {
-                        Vehicle_Drive(VEHICLE_DIR_LEFT, g_remote_speed);
-                    } else if (keys[REMOTE_KEY_RIGHT]) {
-                        Vehicle_Drive(VEHICLE_DIR_RIGHT, g_remote_speed);
-                    } else {
-                        /* 单电机：Y=L正转 A=L反转 X=R正转 B=R反转 */
-                        if (keys[REMOTE_KEY_Y])      Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  g_remote_speed);
-                        else if (keys[REMOTE_KEY_A]) Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_BACKWARD, g_remote_speed);
-                        else                         Vehicle_DriveSingle(MOTOR_LEFT,  MOTOR_DIR_STOP,     g_remote_speed);
-                        if (keys[REMOTE_KEY_X])      Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_FORWARD,  g_remote_speed);
-                        else if (keys[REMOTE_KEY_B]) Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_BACKWARD, g_remote_speed);
-                        else                         Vehicle_DriveSingle(MOTOR_RIGHT, MOTOR_DIR_STOP,     g_remote_speed);
-                    }
-                    g_last_remote_frame = Bsp_Tick_GetMs();
-                }
+                App_Mode_Remote_OnFrame(keys);
             }
         }
 
@@ -357,74 +292,11 @@ int main(void)
         App_Mode_Power_Update();
 
         /* --- 感应模式执行（文档 §9）--- */
-        if (App_Mode_Get() == APP_MODE_SENSOR && !App_Mode_IsPaused()) {
-            uint16_t ir1 = Bsp_IR_ReadCh1();
-            uint16_t ir2 = Bsp_IR_ReadCh2();
-            uint16_t ir3 = Bsp_IR_ReadCh3();
-            uint8_t ir1_trig = (ir1 < IR_THRESHOLD);  /* 有反射=遮挡 */
-            uint8_t ir2_trig = (ir2 < IR_THRESHOLD);
-            uint8_t ir3_trig = (ir3 < IR_THRESHOLD);
-
-            switch (g_sensor_play) {
-            case SENSOR_PLAY_APPROACH:
-                /* 靠近启动：有物体前进，无物体停 */
-                if (ir2_trig) {
-                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_MID);
-                } else {
-                    Vehicle_Drive(VEHICLE_DIR_STOP, MOTOR_SPEED_MID);
-                }
-                break;
-            case SENSOR_PLAY_OBSTACLE:
-                /* 遇障停止：前进，遇障碍停 */
-                if (ir2_trig) {
-                    Vehicle_Drive(VEHICLE_DIR_STOP, MOTOR_SPEED_MID);
-                } else {
-                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_MID);
-                }
-                break;
-            case SENSOR_PLAY_WAVE:
-                /* 挥手开关：IR1/IR2/IR3 任一检测到手（下降沿）→ 切换，500ms 消抖 */
-                {
-                    static uint32_t last_wave = 0;
-                    uint8_t any_edge = (ir1_trig && !g_ir1_was) ||
-                                       (ir2_trig && !g_ir2_was) ||
-                                       (ir3_trig && !g_ir3_was);
-                    if (any_edge && (Bsp_Tick_GetMs() - last_wave > 500)) {
-                        g_wave_on = !g_wave_on;
-                        last_wave = Bsp_Tick_GetMs();
-                    }
-                }
-                if (g_wave_on) {
-                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_MID);
-                } else {
-                    Vehicle_Drive(VEHICLE_DIR_STOP, MOTOR_SPEED_MID);
-                }
-                break;
-            case SENSOR_PLAY_BRIGHTNESS:
-                /* 明暗调速：反射越强（值越小）速度越快 */
-                if (ir2 < 500) {
-                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_HIGH);
-                } else if (ir2 < 1000) {
-                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_MID);
-                } else if (ir2 < IR_THRESHOLD) {
-                    Vehicle_Drive(VEHICLE_DIR_FORWARD, MOTOR_SPEED_LOW);
-                } else {
-                    Vehicle_Drive(VEHICLE_DIR_STOP, MOTOR_SPEED_MID);
-                }
-                break;
-            }
-            g_ir1_was = ir1_trig;
-            g_ir2_was = ir2_trig;
-            g_ir3_was = ir3_trig;
-        }
+        App_Mode_Sensor_Update();
 
         /* --- 遥控模式超时停机（1s 没收到帧才停，防断连电机狂转；
                正常遥控器持续发帧间隔远小于 1s，不会误触发）--- */
-        if (App_Mode_Get() == APP_MODE_REMOTE &&
-            g_last_remote_frame != 0 &&
-            (Bsp_Tick_GetMs() - g_last_remote_frame > 1000)) {
-            Bsp_Motor_StopAll();
-        }
+        App_Mode_Remote_Update();
 
         /* --- 电池采样：10ms 一次入滤波窗口 --- */
         {
