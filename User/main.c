@@ -1,5 +1,6 @@
 #include "main.h"
 #include "Bsp.h"
+#include "Proto_Asr.h"
 
 /* ===== 模式与动作枚举 ===== */
 typedef enum {
@@ -57,22 +58,6 @@ static const uint8_t act_voice[POWER_ACT_COUNT] = {
 static const uint8_t sensor_voice[SENSOR_PLAY_COUNT] = {
     ASR_VOICE_APPROACH_GO, ASR_VOICE_OBSTACLE_STOP,
     ASR_VOICE_WAVE_TOGGLE, ASR_VOICE_BRIGHTNESS,
-};
-/* 语音命令 ID (6..16) → 播报 ID (27..31 / 36..41) 映射。
-   索引 = cmd_id - ASR_CMD_FORWARD (6)。宏值由 v0.7 协议 §三/§四 决定；
-   若协议再调 ID，此表须同步核对。 */
-static const uint8_t cmd_to_voice[11] = {
-    ASR_VOICE_FORWARD,   /* cmd=6  → play=27 */
-    ASR_VOICE_BACKWARD,  /* cmd=7  → play=28 */
-    ASR_VOICE_LEFT,      /* cmd=8  → play=29 */
-    ASR_VOICE_RIGHT,     /* cmd=9  → play=30 */
-    ASR_VOICE_STOP,      /* cmd=10 → play=31 */
-    ASR_VOICE_L_FWD,     /* cmd=11 → play=36 */
-    ASR_VOICE_L_REV,     /* cmd=12 → play=37 */
-    ASR_VOICE_L_STOP,    /* cmd=13 → play=38 */
-    ASR_VOICE_R_FWD,     /* cmd=14 → play=39 */
-    ASR_VOICE_R_REV,     /* cmd=15 → play=40 */
-    ASR_VOICE_R_STOP,    /* cmd=16 → play=41 */
 };
 
 /* ===== TM1640 眼睛图案（8×14 点阵，左眼列0-6 / 右眼列7-13，各 7×8）=====
@@ -340,7 +325,7 @@ int main(void)
                     else if (g_mode == APP_MODE_VOICE &&
                              e.arg >= ASR_CMD_FORWARD && e.arg <= ASR_CMD_R_STOP) {
                         /* 统一回播规则：MCU 实际动作 → 对应播报语 */
-                        Bsp_UartAsr_SendPlay(cmd_to_voice[e.arg - ASR_CMD_FORWARD]);
+                        Bsp_UartAsr_SendPlay(Proto_Asr_CmdToVoice(e.arg));
                         switch (e.arg) {
                         case ASR_CMD_FORWARD:
                             Bsp_Motor_Set(MOTOR_LEFT,  MOTOR_DIR_FORWARD,  MOTOR_SPEED_HIGH);

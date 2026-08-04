@@ -340,7 +340,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,PY32F030x6</Define>
               <Undefine></Undefine>
-              <IncludePath>..\User;..\CMSIS\Include;..\CMSIS\Device\PY32F0xx\Include;..\PY32F0xx_HAL_Driver\Inc;..\BSP_Drivers</IncludePath>
+              <IncludePath>..\User;..\CMSIS\Include;..\CMSIS\Device\PY32F0xx\Include;..\PY32F0xx_HAL_Driver\Inc;..\BSP_Drivers;..\Protocol</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -618,6 +618,16 @@
               <FileName>Bsp_Tm1640.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\BSP_Drivers\Bsp_Tm1640\Bsp_Tm1640.c</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Protocol</GroupName>
+          <Files>
+            <File>
+              <FileName>Proto_Asr.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Protocol\Proto_Asr.c</FilePath>
             </File>
           </Files>
         </Group>
