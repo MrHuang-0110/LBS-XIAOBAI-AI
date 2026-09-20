@@ -46,6 +46,9 @@ CONFIG_PATH = Path.home() / ".xiaobai_programmer" / "config.json"
 
 class MainWindow(QWidget):
     logSignal = Signal(str)
+    statusSignal = Signal(object)        # DeviceStatus
+    bleStateSignal = Signal(bool, str)   # 连接状态（BLE 线程 → GUI 主线程）
+    errorSignal = Signal(str)            # 错误提示（可能来自 BLE 线程）
 
     def __init__(self) -> None:
         super().__init__()
@@ -54,6 +57,7 @@ class MainWindow(QWidget):
 
         self.config = TransportConfig(CONFIG_PATH)
         self.transport = BleTransport(self.config, self._on_frame_from_ble)
+        self.transport.set_state_callback(self._on_ble_state)
         self.session = DeviceSession(self._send_ble, callbacks=self._callbacks())
         self.runner = ProgramRunner(self.session)
         self.fake: FakeDevice | None = None
@@ -61,6 +65,9 @@ class MainWindow(QWidget):
 
         self._build_ui()
         self.logSignal.connect(self.log_view.appendPlainText)
+        self.statusSignal.connect(self._render_status)
+        self.errorSignal.connect(self._error)
+        self.bleStateSignal.connect(self._apply_ble_state)
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self._poll_status)
         self.status_timer.start(500)
@@ -139,12 +146,13 @@ class MainWindow(QWidget):
         page = QWidget()
         box = QVBoxLayout(page)
         self.web = QWebEngineView()
-        channel = QWebChannel()
-        self.bridge = BlocklyBridge()
+        # 必须保存引用：局部变量会被 Python GC，C++ 侧通道随之失效 → JS 报“桥未连接”
+        self.channel = QWebChannel(self)
+        self.bridge = BlocklyBridge(self)
         self.bridge.runRequested.connect(self._run_workspace)
         self.bridge.stopRequested.connect(self._stop_program)
-        channel.registerObject("bridge", self.bridge)
-        self.web.page().setWebChannel(channel)
+        self.channel.registerObject("bridge", self.bridge)
+        self.web.page().setWebChannel(self.channel)
         self.web.load(QUrl.fromLocalFile(str(RESOURCES / "index.html")))
         box.addWidget(self.web)
 
@@ -212,9 +220,51 @@ class MainWindow(QWidget):
 
     def _connect_address(self, address: str) -> None:
         self.log(f"连接 {address} …")
-        self.transport.connect(address).add_done_callback(
-            lambda fut: self.log(f"连接结果：{fut.result() if fut.exception() is None else fut.exception()}")
-        )
+
+        def done(fut) -> None:
+            if fut.exception() is not None:
+                self.log(f"连接失败：{fut.exception()}")
+                return
+            self.log("BLE 已连接，正在探活（查询设备状态）…")
+            self._submit(self._probe_device())
+
+        self.transport.connect(address).add_done_callback(done)
+
+    async def _probe_device(self) -> None:
+        """连上后发一次 QUERY_STATUS：有响应说明写入通路正常。"""
+        try:
+            status = await self.session.query_status()
+            self.log(
+                f"设备在线：{status.mode_name} 红外 {status.ir_left}/{status.ir_center}/"
+                f"{status.ir_right} 电池 {status.battery_mv}mV"
+            )
+        except Exception as exc:  # noqa: BLE001 - 探活失败要给用户可读提示
+            self.log(f"默认写特征 {self.transport.write_uuid} 无响应：{exc}")
+        # 逐个尝试其它可写特征（不同固件/蓝牙栈写入特征不同），成功即持久化
+        for uuid in list(self.transport.write_candidates):
+            if uuid == self.transport.write_uuid:
+                continue
+            self.transport.write_uuid = uuid
+            self.transport.config.set("write_uuid", uuid)
+            try:
+                status = await self.session.query_status()
+            except Exception:  # noqa: BLE001 - 继续试下一个候选
+                continue
+            self.log(
+                f"改用写特征 {uuid} 成功：{status.mode_name} 电池 {status.battery_mv}mV"
+            )
+            return
+        self.log("所有可写特征都无响应：请确认设备已烧录含 BLE v2 的固件，或在上位机日志里核对 UUID")
+
+    def _on_ble_state(self, connected: bool, info: str) -> None:
+        # 注意：本回调运行在 BLE 事件循环线程，只能发信号，不能直接碰控件
+        self.bleStateSignal.emit(connected, info)
+
+    def _apply_ble_state(self, connected: bool, info: str) -> None:
+        self.connect_label.setText(("已连接：" + info) if connected else "未连接")
+        self.log(("已连接 " if connected else "已断开 ") + info)
+        if connected and self.tabs.tabText(self.tabs.currentIndex()) == "Blockly 编程":
+            self._send_session(OP_ENTER_PROGRAM)
 
     def _send_ble(self, data: bytes):
         """把线程池 Future 适配成执行器可 await 的对象（UI 线程不阻塞）。"""
@@ -238,7 +288,7 @@ class MainWindow(QWidget):
         return ExecutorCallbacks(
             on_log=self.log,
             on_event=lambda ev: self.log(f"事件：{ev.describe()}"),
-            on_status=lambda st: self._render_status(st),
+            on_status=lambda st: self.statusSignal.emit(st),
             on_progress=self.log,
         )
 
@@ -279,7 +329,7 @@ class MainWindow(QWidget):
                 await self.session.enter_program()
                 await self.runner.run(program)
             except ExecutorError as exc:
-                self._error(str(exc))
+                self.errorSignal.emit(str(exc))
 
         self._submit(coro())
 
@@ -327,14 +377,24 @@ class MainWindow(QWidget):
     # ---------------- 工具 ----------------
 
     def _submit(self, coro) -> None:
-        asyncio.run_coroutine_threadsafe(coro, self.loop)
+        future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        future.add_done_callback(self._on_future_done)
+
+    def _on_future_done(self, future) -> None:
+        if future.cancelled():
+            return
+        exc = future.exception()
+        if exc is not None:
+            self.log(f"操作失败：{exc}")
 
     def _on_tab_changed(self, index: int) -> None:
         title = self.tabs.tabText(index)
-        if title == "Blockly 编程":
+        if title != "Blockly 编程":
+            return
+        if self.transport.connected or self.fake is not None:
             self._send_session(OP_ENTER_PROGRAM)
-        elif title == "设备连接":
-            pass
+        else:
+            self.log("尚未连接设备：请先在「设备连接」页连接 BLE，或点「离线演示（模拟设备）」")
 
     def log(self, message: str) -> None:
         self.logSignal.emit(message)

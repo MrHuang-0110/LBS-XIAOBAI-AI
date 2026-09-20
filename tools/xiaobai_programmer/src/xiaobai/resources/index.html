@@ -11,6 +11,17 @@
     if (typeof Blockly !== "undefined") Blockly.setLocale(Blockly.Msg);
   </script>
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script>
+    if (typeof QWebChannel !== "function") {
+      window.addEventListener("DOMContentLoaded", () => {
+        const el = document.getElementById("err");
+        if (el) {
+          el.style.display = "block";
+          el.textContent = "页面错误：qwebchannel.js 未加载，无法与上位机通信（请检查 PySide6 安装是否完整）";
+        }
+      });
+    }
+  </script>
   <script src="blocks.js"></script>
   <style>
     html, body { margin: 0; padding: 0; height: 100%; }

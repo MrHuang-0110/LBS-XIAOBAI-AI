@@ -96,6 +96,7 @@ class BleTransport:
         self.address = ""
         self.write_uuid = config.get("write_uuid", "")
         self.notify_uuid = config.get("notify_uuid", "")
+        self.write_candidates: list[str] = []   # 发现到的全部可写特征（探活回退用）
         self._connected = False
         self._closing = False
         self._on_state: Optional[Callable[[bool, str], None]] = None
@@ -185,6 +186,11 @@ class BleTransport:
                     return value
             return fallback
 
+        # 候选排序：优先已知 UUID，其余按发现顺序，探活失败时可逐个回退
+        self.write_candidates = sorted(
+            writable,
+            key=lambda u: (u.lower() not in PREFERRED_WRITE_UUIDS, writable.index(u)),
+        )
         self.write_uuid = self.write_uuid or _pick(writable, PREFERRED_WRITE_UUIDS, "")
         self.notify_uuid = self.notify_uuid or _pick(notifiable, PREFERRED_NOTIFY_UUIDS, "")
         # 持久化发现结果，下次免扫描直连
@@ -248,7 +254,16 @@ class BleTransport:
             raise ConnectionError("BLE 未连接")
         if not self.write_uuid:
             raise RuntimeError("未发现可写特征")
-        await self.client.write_gatt_char(self.write_uuid, data, response=False)
+        try:
+            # 透传模块多支持无响应写；个别 Windows 蓝牙栈/固件要求带响应，失败则回退重试
+            await self.client.write_gatt_char(self.write_uuid, data, response=False)
+        except Exception as first:
+            try:
+                await self.client.write_gatt_char(self.write_uuid, data, response=True)
+            except Exception as second:
+                raise RuntimeError(
+                    f"BLE 写入失败（写特征 {self.write_uuid}）：{second} / 首次：{first}"
+                ) from second
 
     def send(self, data: bytes):
         return self.call(self._send_async(data))
