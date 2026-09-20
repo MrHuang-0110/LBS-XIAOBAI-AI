@@ -2,7 +2,6 @@
 #include "host_stub.h"
 #include "Bsp.h"
 #include "App_Display.h"
-#include "App_Eye.h"
 #include "Eye_Data.h"
 
 static void test_anim_table(void)
@@ -35,26 +34,32 @@ static void test_eye01_frame0_mapping(void)
     CHECK_EQ(g_eye_anims[0].frames[0].ms, 900);
 }
 
-static void test_show_eye_owns_display(void)
+static void test_default_idle_and_release(void)
 {
+    /* 开机默认 EYE_01 待机表情 */
     Host_Tm_Reset();
-    App_Display_ShowEye(2);
+    App_Display_Init();
     for (unsigned c = 0; c < EYE_FRAME_COLS; c++) {
-        CHECK_EQ(g_tm_last[c], g_eye_anims[1].frames[0].col[c]);
+        CHECK_EQ(g_tm_last[c], g_eye_anims[0].frames[0].col[c]);
     }
     CHECK_EQ(g_tm_refresh_count, 1);
 
-    /* 手动显示期间自动动画不再覆盖 */
+    /* 帧步进：EYE_01 首帧 900ms，到点切下一帧 */
+    Host_Tick_Set(0);
+    App_Display_ShowEye(1);
     Host_Tm_Reset();
-    Host_Tick_Advance(5000U);
-    App_Eye_Update();
-    CHECK_EQ(g_tm_refresh_count, 0);
-
-    /* 释放后自动动画恢复（立即重画一帧） */
-    App_Display_Release();
-    Host_Tm_Reset();
-    App_Eye_Update();
+    Host_Tick_Advance(900U);
+    App_Display_Update();
     CHECK_EQ(g_tm_refresh_count, 1);
+    CHECK_EQ(g_tm_last[2], g_eye_anims[0].frames[1].col[2]);
+
+    /* 退出编程模式/手动显示后回到 EYE_01 */
+    App_Display_ShowNumber(5);
+    Host_Tm_Reset();
+    App_Display_Release();
+    for (unsigned c = 0; c < EYE_FRAME_COLS; c++) {
+        CHECK_EQ(g_tm_last[c], g_eye_anims[0].frames[0].col[c]);
+    }
 }
 
 static void test_number_layout(void)
@@ -117,7 +122,7 @@ int test_display(void)
     printf("[display]\n");
     test_anim_table();
     test_eye01_frame0_mapping();
-    test_show_eye_owns_display();
+    test_default_idle_and_release();
     test_number_layout();
     test_digit_font();
     return g_test_fail;

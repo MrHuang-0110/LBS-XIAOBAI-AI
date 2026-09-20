@@ -8,7 +8,6 @@
 #include "App_Mode_Sensor.h"
 #include "App_Mode_Remote.h"
 #include "App_Mode_Voice.h"
-#include "App_Eye.h"
 #include "App_Display.h"
 #include "App_Program.h"
 #include "App_Breath.h"
@@ -42,7 +41,7 @@ void App_Init(void)
     /* PA9 呼吸灯默认关闭：wake 启动 / sleep 立即熄灭（ASRPRO 事件驱动，无本地超时） */
     App_Breath_Init();
 
-    /* 眼睛默认自动动画；编程模式手动显示由 App_Display 接管所有权 */
+    /* 显示默认 EYE_01 待机表情（App_Display 按帧时长循环） */
     App_Display_Init();
 
     /* BLE 配名（BLE 上电后留 500ms） */
@@ -192,9 +191,8 @@ void App_Loop(void)
         /* --- 电机刹停脉冲计时释放 --- */
         Bsp_Motor_Update();
 
-        /* --- 显示：手动表情循环 + 自动动画 --- */
+        /* --- 显示：待机/手动表情帧步进 --- */
         App_Display_Update();
-        App_Eye_Update();
 
         /* --- PA9 呼吸灯：wake 启动 / sleep 熄灭 --- */
         App_Breath_Update();

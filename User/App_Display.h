@@ -2,15 +2,15 @@
 #define APP_DISPLAY_H
 #include <stdint.h>
 
-/* ===== 显示层（编程模式手动显示 + 原自动动画所有权切换）=====
- * 编程模式下 App 可选择表情/数字/关闭显示；手动显示期间禁止原 BLE 眨眼/瞳孔
- * 动画覆盖；退出编程模式调用 App_Display_Release() 恢复自动动画。
- * 表情严格按 V0.2 JSON 的 duration_ms 循环（数据见 User/Eye_Data.c）。 */
+/* ===== 显示层（默认待机表情 EYE_01 + App 手动显示）=====
+ * 开机默认显示 EYE_01「待机」表情并按各帧 duration_ms 循环；
+ * 编程模式下 App 可选择其他表情/数字/关闭显示，退出编程模式后回到 EYE_01。
+ * 表情数据见 User/Eye_Data.c（由 tools/gen_eye_data.py 构建期生成）。 */
 
-/** 初始化：默认交给 App_Eye 自动动画 */
+/** 初始化：立即显示 EYE_01 待机表情（默认显示） */
 void App_Display_Init(void);
 
-/** 主循环周期调用：手动表情帧步进（非阻塞） */
+/** 主循环周期调用：表情帧步进（非阻塞） */
 void App_Display_Update(void);
 
 /** 显示表情 EYE_01..EYE_10（1..10），按帧时长循环到新指令 */
@@ -22,7 +22,7 @@ void App_Display_ShowNumber(uint8_t number);
 /** 关闭显示（保持关闭到新指令） */
 void App_Display_Off(void);
 
-/** 释放手动显示，恢复 App_Eye 自动动画 */
+/** 回到默认待机表情 EYE_01（退出编程模式时调用） */
 void App_Display_Release(void);
 
 #endif

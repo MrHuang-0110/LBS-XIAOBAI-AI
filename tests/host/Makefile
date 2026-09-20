@@ -20,7 +20,6 @@ SRC = \
     $(ROOT)/User/App_Program.c \
     $(ROOT)/User/App_Mode.c \
     $(ROOT)/User/App_Display.c \
-    $(ROOT)/User/App_Eye.c \
     $(ROOT)/User/App_Vehicle.c \
     $(ROOT)/User/Eye_Data.c
 

@@ -1,16 +1,14 @@
 #include "App_Display.h"
-#include "App_Eye.h"
 #include "Bsp.h"
 #include "Eye_Data.h"
 
 typedef enum {
-    DISP_AUTO = 0,   /* 交回 App_Eye 自动动画（默认） */
-    DISP_EYE  = 1,   /* 手动表情循环 */
-    DISP_NUM  = 2,   /* 手动数字（静态） */
-    DISP_OFF  = 3,   /* 关闭显示 */
+    DISP_EYE  = 0,   /* 表情循环（默认 EYE_01 待机） */
+    DISP_NUM  = 1,   /* 手动数字（静态） */
+    DISP_OFF  = 2,   /* 关闭显示 */
 } Disp_Mode_t;
 
-static Disp_Mode_t s_mode = DISP_AUTO;
+static Disp_Mode_t s_mode = DISP_EYE;
 static uint8_t     s_eye = 1;         /* 1..10 */
 static uint8_t     s_frame = 0;
 static uint32_t    s_frame_ms = 0;
@@ -43,25 +41,20 @@ static void Disp_DrawNumber(uint8_t *buf, uint8_t number)
     }
 }
 
-void App_Display_Init(void)
-{
-    s_mode = DISP_AUTO;
-    s_eye = 1;
-    s_frame = 0;
-    s_frame_ms = 0;
-    App_Eye_SetManual(0);
-}
-
 void App_Display_ShowEye(uint8_t id)
 {
     if (id < 1U || id > EYE_ANIM_COUNT) return;
 
-    App_Eye_SetManual(1);
     s_mode = DISP_EYE;
     s_eye = id;
     s_frame = 0;
     s_frame_ms = Bsp_Tick_GetMs();
     Bsp_Tm1640_Refresh(g_eye_anims[id - 1U].frames[0].col);
+}
+
+void App_Display_Init(void)
+{
+    App_Display_ShowEye(1U);   /* 默认：EYE_01 待机表情循环 */
 }
 
 void App_Display_ShowNumber(uint8_t number)
@@ -71,22 +64,19 @@ void App_Display_ShowNumber(uint8_t number)
     uint8_t buf[EYE_FRAME_COLS] = {0};
     Disp_DrawNumber(buf, number);
 
-    App_Eye_SetManual(1);
     s_mode = DISP_NUM;
     Bsp_Tm1640_Refresh(buf);
 }
 
 void App_Display_Off(void)
 {
-    App_Eye_SetManual(1);
     s_mode = DISP_OFF;
     Bsp_Tm1640_Clear();
 }
 
 void App_Display_Release(void)
 {
-    s_mode = DISP_AUTO;
-    App_Eye_SetManual(0);
+    App_Display_ShowEye(1U);   /* 退出编程模式：回到默认待机表情 */
 }
 
 void App_Display_Update(void)

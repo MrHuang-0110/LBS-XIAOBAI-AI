@@ -6,7 +6,6 @@
 #include "App_Program.h"
 #include "App_Mode.h"
 #include "App_Display.h"
-#include "App_Eye.h"
 
 /* 发送一条 C2 帧并全部交给执行器 */
 static void send_c2(uint8_t seq, uint8_t opcode, const uint8_t args[8])

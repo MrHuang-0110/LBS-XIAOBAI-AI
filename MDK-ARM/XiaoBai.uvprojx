@@ -450,11 +450,6 @@
               <FilePath>..\User\App_Mode_Voice.c</FilePath>
             </File>
             <File>
-              <FileName>App_Eye.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\User\App_Eye.c</FilePath>
-            </File>
-            <File>
               <FileName>App_Breath.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\User\App_Breath.c</FilePath>
