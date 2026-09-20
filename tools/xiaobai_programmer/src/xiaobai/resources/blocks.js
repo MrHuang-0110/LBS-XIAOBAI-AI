@@ -6,12 +6,34 @@
     (Blockly.common && Blockly.common.defineBlocksWithJsonArray) ||
     Blockly.defineBlocksWithJsonArray;
 
-  const DIR = [["正转", "FORWARD"], ["反转", "BACKWARD"]];
-  const MOTOR = [["左", "LEFT"], ["右", "RIGHT"]];
-  const MOVE = [["前进", "FORWARD"], ["左转", "LEFT"], ["右转", "RIGHT"], ["后退", "BACKWARD"]];
-  const CHANNEL = [["左", "LEFT"], ["中", "CENTER"], ["右", "RIGHT"]];
-  const CMP = [["大于", "GT"], ["小于", "LT"]];
-  const LEVEL = [["1", "1"], ["2", "2"], ["3", "3"]];
+  const DIR = [
+    ["正转", "FORWARD"],
+    ["反转", "BACKWARD"],
+  ];
+  const MOTOR = [
+    ["左", "LEFT"],
+    ["右", "RIGHT"],
+  ];
+  const MOVE = [
+    ["前进", "FORWARD"],
+    ["左转", "LEFT"],
+    ["右转", "RIGHT"],
+    ["后退", "BACKWARD"],
+  ];
+  const CHANNEL = [
+    ["左", "LEFT"],
+    ["中", "CENTER"],
+    ["右", "RIGHT"],
+  ];
+  const CMP = [
+    ["大于", "GT"],
+    ["小于", "LT"],
+  ];
+  const LEVEL = [
+    ["1", "1"],
+    ["2", "2"],
+    ["3", "3"],
+  ];
 
   const statement = { previousStatement: null, nextStatement: null };
 
@@ -133,7 +155,8 @@
       args0: [{ type: "input_value", name: "EYE", check: "Number" }],
       ...statement,
       colour: 210,
-      tooltip: "1=待机 2=开心 3=生气 4=伤心 5=惊讶 6=眨眼 7=喜欢 8=晕眩 9=困倦 10=好奇",
+      tooltip:
+        "1=待机 2=开心 3=生气 4=伤心 5=惊讶 6=眨眼 7=喜欢 8=晕眩 9=困倦 10=好奇",
     },
     {
       type: "xiaobai_show_num",

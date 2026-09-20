@@ -8,7 +8,9 @@
     }
   };
 
-  const num = (value) => ({ shadow: { type: "math_number", fields: { NUM: value } } });
+  const num = (value) => ({
+    shadow: { type: "math_number", fields: { NUM: value } },
+  });
   const blk = (type, inputs, fields) => {
     const item = { kind: "block", type };
     if (inputs) item.inputs = inputs;
@@ -100,11 +102,16 @@
   window.xiaobaiWorkspace = workspace;
 
   let bridge = null;
-  if (typeof QWebChannel === "function" && window.qt && qt.webChannelTransport) {
+  if (
+    typeof QWebChannel === "function" &&
+    window.qt &&
+    qt.webChannelTransport
+  ) {
     new QWebChannel(qt.webChannelTransport, (channel) => {
       bridge = channel.objects.bridge;
       const status = document.getElementById("status");
-      if (status) status.textContent = "已就绪（" + bridge.protocol_version() + "）";
+      if (status)
+        status.textContent = "已就绪（" + bridge.protocol_version() + "）";
     });
   } else {
     const status = document.getElementById("status");
@@ -116,7 +123,9 @@
       err("与上位机的桥未连接，无法运行");
       return;
     }
-    const json = JSON.stringify(Blockly.serialization.workspaces.save(workspace));
+    const json = JSON.stringify(
+      Blockly.serialization.workspaces.save(workspace),
+    );
     bridge.run_workspace(json);
   };
 
