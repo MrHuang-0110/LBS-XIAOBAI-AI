@@ -18,8 +18,8 @@ from xiaobai.protocol import Frame, StreamParser
 
 # 常见 ECB00/透传模块 UUID（仅作为发现优先级，不作为唯一依据）
 PREFERRED_WRITE_UUIDS = (
+    "0000fff2-0000-1000-8000-00805f9b34fb",   # ECB00 实测写特征（FFF0 服务的 FFF2）
     "0000ffe1-0000-1000-8000-00805f9b34fb",
-    "0000fff2-0000-1000-8000-00805f9b34fb",
     "6e400002-b5a3-f393-e0a9-e50e24dcca9e",   # Nordic UART RX
 )
 PREFERRED_NOTIFY_UUIDS = (
@@ -255,11 +255,11 @@ class BleTransport:
         if not self.write_uuid:
             raise RuntimeError("未发现可写特征")
         try:
-            # 透传模块多支持无响应写；个别 Windows 蓝牙栈/固件要求带响应，失败则回退重试
-            await self.client.write_gatt_char(self.write_uuid, data, response=False)
+            # 实测（ECB00 + Windows）：无确认写会静默丢包且不报错，必须优先带确认写
+            await self.client.write_gatt_char(self.write_uuid, data, response=True)
         except Exception as first:
             try:
-                await self.client.write_gatt_char(self.write_uuid, data, response=True)
+                await self.client.write_gatt_char(self.write_uuid, data, response=False)
             except Exception as second:
                 raise RuntimeError(
                     f"BLE 写入失败（写特征 {self.write_uuid}）：{second} / 首次：{first}"

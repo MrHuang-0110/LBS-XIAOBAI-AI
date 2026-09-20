@@ -64,8 +64,26 @@ def describe(frame_type: int, data: bytes) -> str:
                     f"任务={(data[9] >> 4) & 0xF} 故障=0x{data[9] & 0xF:02X}")
         return f"D2 DONE seq={seq} op=0x{opcode:02X}"
     if frame_type == TYPE_D3:
-        return f"D3 事件: {EVENT_NAMES.get(data[0], data[0])} counter={data[1]}"
+        event, counter, d = data[0], data[1], data[2:]
+        name = EVENT_NAMES.get(event, event)
+        if event == 0x01 and len(d) >= 2:            # 模式变化
+            return (f"D3 {name}: {MODE_NAMES.get(d[1], d[1])} → {MODE_NAMES.get(d[0], d[0])} "
+                    f"(counter={counter})")
+        if event == 0x02 and len(d) >= 2:            # 程序中止
+            return f"D3 {name}: 原因={d[0]} 目标={MODE_NAMES.get(d[1], d[1])} (counter={counter})"
+        if event == 0x03 and len(d) >= 4:            # 红外变化
+            return f"D3 {name}: {d[0]}/{d[1]}/{d[2]} 掩码=0x{d[3]:02X} (counter={counter})"
+        if event == 0x07 and len(d) >= 1:
+            return f"D3 {name}: code={d[0]} (counter={counter})"
+        return f"D3 {name}: {d.hex(' ').upper()} (counter={counter})"
     return f"TYPE=0x{frame_type:02X} {data.hex(' ').upper()}"
+
+
+T0 = time.time()
+
+
+def stamp() -> str:
+    return f"[t={time.time() - T0:5.1f}s]"
 
 
 class Probe:
@@ -97,11 +115,11 @@ class Probe:
             except asyncio.TimeoutError:
                 continue
             count += 1
-            print(f"  << [{label}] {describe(frame_type, data)}")
+            print(f"  {stamp()} << [{label}] {describe(frame_type, data)}")
         return count
 
 
-async def run(address: str | None, seconds: float, do_enter: bool) -> int:
+async def run(address: str | None, seconds: float, do_enter: bool, idle: bool = False) -> int:
     if not address:
         print("扫描 6 秒（请确保设备已上电、且没有被手机/其它 App 占用）…")
         scan_seconds = seconds if seconds > 20 else max(8.0, seconds)
@@ -133,7 +151,7 @@ async def run(address: str | None, seconds: float, do_enter: bool) -> int:
     disconnected = asyncio.Event()
 
     def on_disconnect(_client) -> None:
-        print("!! 连接断开")
+        print(f"  {stamp()} !! 连接断开（link loss）")
         disconnected.set()
 
     async with BleakClient(address, disconnected_callback=on_disconnect, timeout=20.0) as client:
@@ -159,12 +177,13 @@ async def run(address: str | None, seconds: float, do_enter: bool) -> int:
         print("--- 逐个可写特征试发 QUERY_STATUS（判定真正到达设备的特征）---")
         good = None
         for uuid in writable:
-            for response in (False, True):
+            for response in (True, False):
                 try:
                     await client.write_gatt_char(uuid, build_c2(0, OP_QUERY_STATUS), response=response)
+                    print(f"  {uuid[:8]} 试写 OK (response={response})")
                     break
                 except Exception as exc:  # noqa: BLE001
-                    print(f"  {uuid} response={response} 写失败: {exc}")
+                    print(f"  {uuid[:8]} response={response} 写失败: {exc}")
             got = await probe.drain(1.2, uuid[:8])
             print(f"  {uuid} → 收到 {got} 帧")
             if got:
@@ -175,22 +194,46 @@ async def run(address: str | None, seconds: float, do_enter: bool) -> int:
         else:
             print(f"[OK] 可用写特征: {good}")
 
+        async def write_frame(uuid: str, payload: bytes, label: str = "") -> None:
+            """带确认写优先（response=True）：无确认写在本模块上会静默丢包。"""
+            errors = []
+            for response in (True, False):
+                try:
+                    await client.write_gatt_char(uuid, payload, response=response)
+                    if label:
+                        print(f"  {stamp()} >> 写 {label} OK (response={response})")
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"response={response}: {exc}")
+            print(f"  {stamp()} >> 写 {label or payload.hex(' ')} 失败：{errors}")
+
+        async def heartbeat_loop(uuid: str, stop: asyncio.Event) -> None:
+            # 心跳必须紧跟 ENTER_PROGRAM 开始：固件只有 1000ms 宽限
+            while not stop.is_set():
+                await write_frame(uuid, build_c2(0, OP_HEARTBEAT))
+                await asyncio.sleep(0.3)
+
         if good and do_enter:
             print("--- 发 ENTER_PROGRAM（设备应四灯跑马 + 播报 ID 52）---")
-            await client.write_gatt_char(good, build_c2(0, OP_ENTER_PROGRAM), response=False)
-            await probe.drain(1.0, "enter")
+            await write_frame(good, build_c2(0, OP_ENTER_PROGRAM), "ENTER_PROGRAM")
 
-        if good:
-            print(f"--- 持续心跳 {seconds:.0f}s（否则 1s 后设备退出编程模式）---")
-            end = time.time() + seconds
-            while time.time() < end and not disconnected.is_set():
-                for response in (False, True):
-                    try:
-                        await client.write_gatt_char(good, build_c2(0, OP_HEARTBEAT), response=response)
-                        break
-                    except Exception:  # noqa: BLE001
-                        continue
-                await probe.drain(0.3, "hb")
+        if good and idle:
+            print(f"--- 空闲观察 {seconds:.0f}s（只订阅通知，不写任何数据）---")
+            await probe.drain(seconds, "idle")
+            if not disconnected.is_set():
+                print(f"  {stamp()} 空闲期间链路保持")
+        elif good:
+            print(f"--- 持续 {seconds:.0f}s：300ms 心跳 + 通知观察 ---")
+            stop = asyncio.Event()
+            hb_task = asyncio.create_task(heartbeat_loop(good, stop))
+            await probe.drain(seconds / 2, "run")
+            # 运行中查一次状态，确认设备仍在编程模式
+            await write_frame(good, build_c2(0, OP_QUERY_STATUS), "QUERY_STATUS")
+            await probe.drain(seconds / 2, "run")
+            stop.set()
+            await hb_task
+            if not disconnected.is_set():
+                print(f"  {stamp()} 全程链路保持（编程模式未被心跳超时踢出）")
         await probe.drain(0.5, "tail")
     print("探针结束")
     return 0
@@ -253,11 +296,12 @@ def main() -> int:
     parser.add_argument("--seconds", type=float, default=8.0)
     parser.add_argument("--no-enter", action="store_true")
     parser.add_argument("--hunt", type=int, default=0, help="猎手模式：试探信号最强的 N 个设备")
+    parser.add_argument("--idle", action="store_true", help="连接后不写数据，只观察链路稳定性")
     args = parser.parse_args()
     try:
         if args.hunt:
             return asyncio.run(hunt(args.hunt, max(8.0, args.seconds)))
-        return asyncio.run(run(args.address, args.seconds, not args.no_enter))
+        return asyncio.run(run(args.address, args.seconds, not args.no_enter, args.idle))
     except Exception as exc:  # noqa: BLE001
         print(f"探针异常：{type(exc).__name__}: {exc}")
         return 1
