@@ -297,6 +297,30 @@ static void test_wait_voice(void)
     CHECK(Host_Tx_FindData(PROTO_BLE_TYPE_D2, 10, PROTO_OP_WAIT_VOICE, 0) >= 0);
 }
 
+static void test_play_voice_mapping(void)
+{
+    reset_world();
+    enter_program();
+    Host_Play_Reset();
+    Host_Tx_Reset();
+
+    /* P01 → 播报 ID 54；P10 → 63 */
+    uint8_t p01[8] = {1, 0, 0, 0, 0, 0, 0, 0};
+    send_c2(11, PROTO_OP_PLAY_VOICE, p01);
+    CHECK_EQ(Host_Play_CountOf(54), 1);
+
+    uint8_t p10[8] = {10, 0, 0, 0, 0, 0, 0, 0};
+    send_c2(12, PROTO_OP_PLAY_VOICE, p10);
+    CHECK_EQ(Host_Play_CountOf(63), 1);
+
+    /* 非法词条号：回一次错误响应，不播报 */
+    uint8_t bad[8] = {11, 0, 0, 0, 0, 0, 0, 0};
+    Host_Tx_Reset();
+    send_c2(13, PROTO_OP_PLAY_VOICE, bad);
+    CHECK(Host_Tx_FindData(PROTO_BLE_TYPE_D2, 13, PROTO_OP_PLAY_VOICE, 0) >= 0);
+    CHECK_EQ(Host_Play_CountOf(53), 0);
+}
+
 static void test_stop_program(void)
 {
     reset_world();
@@ -437,6 +461,7 @@ int test_program(void)
     test_invalid_param_and_unknown_opcode();
     test_wait_ir();
     test_wait_voice();
+    test_play_voice_mapping();
     test_stop_program();
     test_heartbeat_timeout_and_keepalive();
     test_query_status_and_read_ir();
