@@ -1,13 +1,15 @@
-#ifndef __BSP_LED_H
-#define __BSP_LED_H
+#ifndef BSP_LED_H
+#define BSP_LED_H
 #include "py32f0xx_hal.h"
 
+/* 物理 LED 枚举（2026-09-16 起改为物理编号，消除历史“枚举名≠引脚/模式”错位）。
+ * 逻辑模式 → LED 的映射统一在 App_Mode.c 的 mode_led[] 维护。 */
 typedef enum {
-    LED_MODE_POWER  = 0,  /* LED1 - 动力 - PB2  */
-    LED_MODE_SENSOR = 1,  /* LED2 - 感应 - PA10 */
-    LED_MODE_REMOTE = 2,  /* LED3 - 遥控 - PA11 */
-    LED_MODE_VOICE  = 3,  /* LED4 - 语音 - PA12 */
-    LED_MODE_COUNT
+    LED_1 = 0,   /* PB2  */
+    LED_2 = 1,   /* PA10 */
+    LED_3 = 2,   /* PA11 */
+    LED_4 = 3,   /* PA12 */
+    LED_COUNT
 } Bsp_Led_Id_t;
 
 void Bsp_Led_Init(void);

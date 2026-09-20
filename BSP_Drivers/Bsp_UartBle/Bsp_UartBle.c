@@ -26,9 +26,11 @@ static UART_HandleTypeDef huart;
 static DMA_HandleTypeDef  hdma_rx;
 static uint8_t g_rx[BLE_RX_BUF_SIZE];
 
-/* 出队缓冲：IDLE 中断累积，TryRecv 一次性取走 */
+/* 出队缓冲：IDLE 中断累积，TryRecv 按需取走。
+ *   读指针 g_out_rd 支持“一次未取完不丢数据”：取空后复位，消费过半后压缩。 */
 static uint8_t  g_out[BLE_RX_BUF_SIZE];
 static volatile uint16_t g_out_len = 0;
+static volatile uint16_t g_out_rd  = 0;
 
 /* 上次处理到的 DMA 位置（只在 IRQ 里访问） */
 static uint16_t g_last_pos = 0;
@@ -119,13 +121,28 @@ void Bsp_UartBle_ConfigName(const char *name, uint8_t len)
 
 uint16_t Bsp_UartBle_TryRecv(uint8_t *out_buf, uint16_t max_len)
 {
+    uint16_t copied = 0;
+    // pi-lens-ignore: no-reserved-identifiers -- CMSIS 内核内建，不可重命名
     __disable_irq();
-    uint16_t n = g_out_len;
-    if (n > max_len) n = max_len;
-    if (n) memcpy(out_buf, g_out, n);
-    g_out_len = 0;
+    uint16_t avail = (uint16_t)(g_out_len - g_out_rd);
+    copied = (avail > max_len) ? max_len : avail;
+    if (copied) {
+        memcpy(out_buf, &g_out[g_out_rd], copied);
+        g_out_rd = (uint16_t)(g_out_rd + copied);
+    }
+    if (g_out_rd >= g_out_len) {
+        g_out_len = 0;          /* 取空：复位，IRQ 可继续追加 */
+        g_out_rd  = 0;
+    } else if (g_out_rd >= 64U) {
+        /* 半消费：压缩剩余数据，保证 IRQ 侧始终有空间不丢帧 */
+        uint16_t remain = (uint16_t)(g_out_len - g_out_rd);
+        memmove(g_out, &g_out[g_out_rd], remain);
+        g_out_len = remain;
+        g_out_rd  = 0;
+    }
+    // pi-lens-ignore: no-reserved-identifiers -- CMSIS 内核内建，不可重命名
     __enable_irq();
-    return n;
+    return copied;
 }
 
 uint8_t Bsp_UartBle_IsConnected(void)

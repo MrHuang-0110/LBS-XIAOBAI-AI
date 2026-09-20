@@ -21,7 +21,7 @@ void Vehicle_Drive(App_Vehicle_Dir_t dir, Bsp_Motor_Speed_t speed)
         break;
     case VEHICLE_DIR_STOP:
     default:
-        Bsp_Motor_StopAll();
+        Bsp_Motor_BrakeAll();     /* 动作结束统一短刹 */
         break;
     }
 }

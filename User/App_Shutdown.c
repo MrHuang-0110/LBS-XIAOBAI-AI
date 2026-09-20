@@ -4,7 +4,7 @@
 
 void App_Shutdown_Execute(void)
 {
-    Bsp_Motor_StopAll();
+    Bsp_Motor_BrakeAll();      /* 关机流程统一短刹 */
     Bsp_UartAsr_SendPlay(ASR_VOICE_SHUTDOWN);
     Bsp_Power_ShutdownAnimation();
     Bsp_LedPwm_Set(LEDPWM_1, 0);

@@ -474,6 +474,21 @@
               <FileType>1</FileType>
               <FilePath>..\User\App_Main.c</FilePath>
             </File>
+            <File>
+              <FileName>App_Program.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Program.c</FilePath>
+            </File>
+            <File>
+              <FileName>App_Display.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\App_Display.c</FilePath>
+            </File>
+            <File>
+              <FileName>Eye_Data.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\User\Eye_Data.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -690,9 +705,9 @@
               <FilePath>..\Protocol\Proto_Asr.c</FilePath>
             </File>
             <File>
-              <FileName>Proto_Remote.c</FileName>
+              <FileName>Proto_Ble.c</FileName>
               <FileType>1</FileType>
-              <FilePath>..\Protocol\Proto_Remote.c</FilePath>
+              <FilePath>..\Protocol\Proto_Ble.c</FilePath>
             </File>
           </Files>
         </Group>

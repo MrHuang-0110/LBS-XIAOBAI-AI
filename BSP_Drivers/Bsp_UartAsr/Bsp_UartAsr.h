@@ -2,16 +2,17 @@
 #define __BSP_UART_ASR_H
 #include "py32f0xx_hal.h"
 
-/* 语音芯片交互协议 v0.7（ASCII 文本；两方向均带帧尾：MCU 发帧尾 `\n`，收帧尾 `\r\n`；
+/* 语音芯片交互协议 v0.8（ASCII 文本；两方向均带帧尾：MCU 发帧尾 `\n`，收帧尾 `\r\n`；
    tag 用 `=` 分隔十进制数值）。
    ★ 协议 ID 宏（ASR_VOICE_* / ASR_CMD_*）与 cmd_to_voice 映射已上移到 Protocol/Proto_Asr.h，
    本驱动只负责 ASCII 帧解析 / DMA 收发 / 事件队列，不持有协议 ID。 */
 
 typedef enum {
-    ASR_EVT_NONE = 0,
-    ASR_EVT_CMD  = 1,   /* ASRPRO 识别到语音命令，arg = 命令 ID (ASR_CMD_*) */
-    ASR_EVT_WAKE = 2,   /* ASRPRO 检测到唤醒词，arg 无意义 */
-    ASR_EVT_DONE = 3,   /* ASRPRO 播报完成，arg = 上次的语音 ID */
+    ASR_EVT_NONE  = 0,
+    ASR_EVT_CMD   = 1,   /* ASRPRO 识别到语音命令，arg = 命令 ID (ASR_CMD_*) */
+    ASR_EVT_WAKE  = 2,   /* ASRPRO 检测到唤醒词，arg 无意义 */
+    ASR_EVT_DONE  = 3,   /* ASRPRO 播报完成，arg = 上次的语音 ID */
+    ASR_EVT_SLEEP = 4,   /* ASRPRO 进入休眠（v0.8：sys_sleep_hook 发 sleep\r\n） */
 } Bsp_UartAsr_EvtType_t;
 
 typedef struct {

@@ -26,19 +26,35 @@ static const struct { uint16_t ms; uint8_t pos; } look_seq[] = {
 };
 #define LOOK_LEN (sizeof(look_seq)/sizeof(look_seq[0]))
 
+/* 显示所有权：1=手动显示（App_Display）接管，本模块暂停 */
+static uint8_t  s_manual = 0;
+static uint32_t s_last_t = 0;
+static uint8_t  s_frame = 0;
+static uint8_t  s_was_connected = 0xFF;
+
+void App_Eye_SetManual(uint8_t manual)
+{
+    if (manual == s_manual) return;
+    s_manual = manual;
+    if (!manual) {
+        /* 恢复自动动画：强制下一轮按连接状态重画 */
+        s_was_connected = 0xFF;
+        s_frame = 0;
+    }
+}
+
 void App_Eye_Update(void)
 {
-    static uint32_t last_t = 0;
-    static uint8_t  frame = 0;
-    static uint8_t  was_connected = 0xFF;
+    if (s_manual) return;
+
     uint8_t connected = Bsp_UartBle_IsConnected();
     uint32_t now = Bsp_Tick_GetMs();
 
     /* 连接状态切换时重置，立刻显示第一帧 */
-    if (connected != was_connected) {
-        last_t = now;
-        frame = 0;
-        was_connected = connected;
+    if (connected != s_was_connected) {
+        s_last_t = now;
+        s_frame = 0;
+        s_was_connected = connected;
         if (connected) {
             uint8_t buf[14];
             for (int i = 0; i < 14; i++) buf[i] = eye_box[i];
@@ -55,12 +71,12 @@ void App_Eye_Update(void)
 
     if (connected) {
         /* 瞳孔移动：看左上 → 回中 → 看右上 → 回中 */
-        if (now - last_t >= look_seq[frame].ms) {
-            last_t = now;
-            frame = (uint8_t)((frame + 1) % LOOK_LEN);
+        if (now - s_last_t >= look_seq[s_frame].ms) {
+            s_last_t = now;
+            s_frame = (uint8_t)((s_frame + 1) % LOOK_LEN);
             uint8_t buf[14];
             for (int i = 0; i < 14; i++) buf[i] = eye_box[i];
-            uint8_t p = look_seq[frame].pos;
+            uint8_t p = look_seq[s_frame].pos;
             for (int c = 0; c < 3; c++) {
                 buf[pupil_lc[p] + c] |= pupil_bit[p];
                 buf[pupil_rc[p] + c] |= pupil_bit[p];
@@ -69,10 +85,10 @@ void App_Eye_Update(void)
         }
     } else {
         /* 双眨 */
-        if (now - last_t >= blink_idle[frame].ms) {
-            last_t = now;
-            frame = (uint8_t)((frame + 1) % BLINK_IDLE_LEN);
-            if (blink_idle[frame].closed) Bsp_Tm1640_Refresh(eye_closed);
+        if (now - s_last_t >= blink_idle[s_frame].ms) {
+            s_last_t = now;
+            s_frame = (uint8_t)((s_frame + 1) % BLINK_IDLE_LEN);
+            if (blink_idle[s_frame].closed) Bsp_Tm1640_Refresh(eye_closed);
             else                          Bsp_Tm1640_Refresh(eye_box);
         }
     }

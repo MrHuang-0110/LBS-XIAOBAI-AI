@@ -74,6 +74,11 @@ static void Line_Dispatch(const uint8_t *line, uint16_t len)
         Evt_Push(ASR_EVT_WAKE, 0);
         return;
     }
+    /* sleep（v0.8：ASRPRO 进入休眠，呼吸灯立即熄灭） */
+    if (len == 5 && memcmp(line, "sleep", 5) == 0) {
+        Evt_Push(ASR_EVT_SLEEP, 0);
+        return;
+    }
     /* cmd=NN */
     if (len >= 3 && memcmp(line, "cmd", 3) == 0) {
         uint8_t v;

@@ -2,7 +2,7 @@
 
 typedef struct { GPIO_TypeDef *port; uint16_t pin; } LedPin_t;
 
-static const LedPin_t g_leds[LED_MODE_COUNT] = {
+static const LedPin_t g_leds[LED_COUNT] = {
     { GPIOB, GPIO_PIN_2  },  /* LED1 PB2  */
     { GPIOA, GPIO_PIN_10 },  /* LED2 PA10 */
     { GPIOA, GPIO_PIN_11 },  /* LED3 PA11 */
@@ -11,7 +11,9 @@ static const LedPin_t g_leds[LED_MODE_COUNT] = {
 
 void Bsp_Led_Init(void)
 {
+    // pi-lens-ignore: no-reserved-identifiers -- 普冉 HAL 供应商宏，不可重命名
     __HAL_RCC_GPIOA_CLK_ENABLE();
+    // pi-lens-ignore: no-reserved-identifiers
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
     GPIO_InitTypeDef gi = {0};
@@ -29,23 +31,23 @@ void Bsp_Led_Init(void)
 
 void Bsp_Led_On(Bsp_Led_Id_t id)
 {
-    if (id >= LED_MODE_COUNT) return;
+    if (id >= LED_COUNT) return;
     HAL_GPIO_WritePin(g_leds[id].port, g_leds[id].pin, GPIO_PIN_RESET);
 }
 
 void Bsp_Led_Off(Bsp_Led_Id_t id)
 {
-    if (id >= LED_MODE_COUNT) return;
+    if (id >= LED_COUNT) return;
     HAL_GPIO_WritePin(g_leds[id].port, g_leds[id].pin, GPIO_PIN_SET);
 }
 
 void Bsp_Led_Toggle(Bsp_Led_Id_t id)
 {
-    if (id >= LED_MODE_COUNT) return;
+    if (id >= LED_COUNT) return;
     HAL_GPIO_TogglePin(g_leds[id].port, g_leds[id].pin);
 }
 
 void Bsp_Led_AllOff(void)
 {
-    for (int i = 0; i < LED_MODE_COUNT; i++) Bsp_Led_Off((Bsp_Led_Id_t)i);
+    for (int i = 0; i < LED_COUNT; i++) Bsp_Led_Off((Bsp_Led_Id_t)i);
 }

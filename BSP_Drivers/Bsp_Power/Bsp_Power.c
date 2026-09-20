@@ -12,7 +12,9 @@
 
 static void Power_GpioInit(void)
 {
+    // pi-lens-ignore: no-reserved-identifiers -- 普冉 HAL 供应商宏，不可重命名
     __HAL_RCC_GPIOA_CLK_ENABLE();
+    // pi-lens-ignore: no-reserved-identifiers
     __HAL_RCC_GPIOB_CLK_ENABLE();
 
     GPIO_InitTypeDef gi = {0};
@@ -50,7 +52,7 @@ uint8_t Bsp_Power_Init_WaitConfirm(void)
         uint32_t elapsed = Bsp_Tick_GetMs() - t0;
 
         uint8_t want_stage = (uint8_t)(elapsed / WAIT_STEP_MS);
-        if (want_stage > LED_MODE_COUNT) want_stage = LED_MODE_COUNT;
+        if (want_stage > LED_COUNT) want_stage = LED_COUNT;
         while (stage < want_stage) {
             Bsp_Led_On((Bsp_Led_Id_t)stage);
             stage++;
@@ -61,14 +63,14 @@ uint8_t Bsp_Power_Init_WaitConfirm(void)
             HAL_GPIO_WritePin(PWR_CTRL_PORT, PWR_CTRL_PIN, GPIO_PIN_SET);
             /* 先保持 4 灯全亮 200ms，让用户看清"确认成功" */
             Bsp_Led_AllOff();
-            Bsp_Led_On(LED_MODE_POWER);
-            Bsp_Led_On(LED_MODE_SENSOR);
-            Bsp_Led_On(LED_MODE_REMOTE);
-            Bsp_Led_On(LED_MODE_VOICE);
+            Bsp_Led_On(LED_1);
+            Bsp_Led_On(LED_2);
+            Bsp_Led_On(LED_3);
+            Bsp_Led_On(LED_4);
             Bsp_Tick_DelayMs(200);
             /* 开机成功指示：4 只 LED 快速滚动 2 圈 */
             for (uint8_t round = 0; round < 2; round++) {
-                for (uint8_t i = 0; i < LED_MODE_COUNT; i++) {
+                for (uint8_t i = 0; i < LED_COUNT; i++) {
                     Bsp_Led_AllOff();
                     Bsp_Led_On((Bsp_Led_Id_t)i);
                     Bsp_Tick_DelayMs(80);
@@ -89,13 +91,13 @@ void Bsp_Power_ShutDown(void)
 void Bsp_Power_ShutdownAnimation(void)
 {
     /* 关机动画（开机逐个亮的反向）：4 灯全亮 -> 逐个灭，每 500ms，总 2s */
-    Bsp_Led_On(LED_MODE_POWER);
-    Bsp_Led_On(LED_MODE_SENSOR);
-    Bsp_Led_On(LED_MODE_REMOTE);
-    Bsp_Led_On(LED_MODE_VOICE);
+    Bsp_Led_On(LED_1);
+    Bsp_Led_On(LED_2);
+    Bsp_Led_On(LED_3);
+    Bsp_Led_On(LED_4);
     Bsp_Tick_DelayMs(500);
-    Bsp_Led_Off(LED_MODE_POWER);   Bsp_Tick_DelayMs(500);
-    Bsp_Led_Off(LED_MODE_SENSOR);  Bsp_Tick_DelayMs(500);
-    Bsp_Led_Off(LED_MODE_REMOTE);  Bsp_Tick_DelayMs(500);
-    Bsp_Led_Off(LED_MODE_VOICE);   Bsp_Tick_DelayMs(500);
+    Bsp_Led_Off(LED_1);   Bsp_Tick_DelayMs(500);
+    Bsp_Led_Off(LED_2);  Bsp_Tick_DelayMs(500);
+    Bsp_Led_Off(LED_3);  Bsp_Tick_DelayMs(500);
+    Bsp_Led_Off(LED_4);   Bsp_Tick_DelayMs(500);
 }
