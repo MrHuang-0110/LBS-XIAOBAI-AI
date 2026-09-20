@@ -66,3 +66,17 @@ src/xiaobai/ui/            PySide6 界面 + QWebChannel 桥
 src/xiaobai/resources/     离线 Blockly 11.2 + 自定义积木（blocks.js/app.js）
 tests/                     pytest（36 项）
 ```
+
+## 排障工具：无界面 BLE 探针
+
+`tools\ble_probe.py`（需要 Windows Python + `pip install bleak`），不依赖 PySide6：
+
+```bat
+cd /d E:\LBS-XIAOBAI-AI\tools\xiaobai_programmer
+python tools\ble_probe.py                    # 扫描名字含 Spark 并连接，发 ENTER_PROGRAM + 心跳
+python tools\ble_probe.py --seconds 12       # 观察收到的 D2/D3 帧
+python tools\ble_probe.py --address AA:BB:.. # 直连指定地址
+python tools\ble_probe.py --hunt 8           # 猎手模式：试探信号最强的 8 个设备，谁能按协议回帧就锁定
+```
+
+用途：判定写特征是否正确、设备是否在广播、固件是否为含 BLE v2 的版本。
