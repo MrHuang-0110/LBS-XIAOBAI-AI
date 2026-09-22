@@ -39,7 +39,7 @@
 
 ### 🎮 遥控模式
 
-- BLE 透传（ECB00CV2）+ PF3 电平判连接
+- BLE 透传（ECB02）+ PF3 电平判连接
 - 兼容原 17 字节遥控帧；新增 BLE v2：`C2` 编程请求 / `D2` 响应（DONE/查询/错误）/ `D3` 事件
 - 方向键坦克转向、单电机微操（Y/A/X/B）、肩键 **L1 加速 / R1 减速** 三档调速
 - **1s 无帧自动停机**——防断连电机狂转
@@ -49,7 +49,7 @@
 - 上位机（Windows Blockly）负责循环 / 条件 / 等待与流程编排，主控作为 BLE 指令执行器
 - 定时电机与组合移动、持续动作、功率档、单电机保留、刹停；等待红外（左/中/右、`>`/`<`、0–100）与等待词条（ASR_01–ASR_10）
 - 表情 EYE_01–EYE_10 按原帧时长循环、数字 0–100、关闭显示；P01–P10 播报
-- 需要回报的任务完成后立即 `DONE` 并每 200ms 重发，直到下一条指令；心跳 300ms、1s 超时自动刹车退出
+- 需要回报的任务完成后立即 `DONE` 并每 200ms 重发，直到下一条指令；空闲心跳 300ms，前台有效 C2 也刷新会话，1s 无有效流量自动刹车退出
 
 ### 👀 表现层
 
@@ -69,7 +69,7 @@
 | --- | --- |
 | 主控 | 普冉 **PY32F030K28U6TR**（Cortex-M0+，Flash 32KB，RAM 4KB，48MHz max） |
 | 语音识别 | ASRPRO 芯片（USART2，9600 8N1，协议 v0.7） |
-| BLE | ECB00CV2 透传模块（USART1，9600 8N1，PF3 STA 判连接） |
+| BLE | ECB02 透传模块（USART1，9600 8N1，PF3 STA 判连接） |
 | 电机 | TIM3 4 通道 PWM 20kHz 双电机，3 档速度（40% / 70% / 100%） |
 | 眼睛屏 | TM1640 驱动 8×14 点阵（16 列芯片用 14 列） |
 | 传感器 | 3 路红外反射（PA1/PA2/PA3 + PF4 发射常亮）+ 1 路电池分压（PA0） |
@@ -186,7 +186,7 @@ UV4 -b MDK-ARM/XiaoBai.uvprojx -j0 -o build.log
 | 语音芯片交互 | **v0.8** | ASCII 文本：MCU 发 `play=NN\n`；收 `cmd=NN\r\n` / `done=NN\r\n` / `wake\r\n` / `sleep\r\n`；命令 ID 1-16/42-51，播报 ID 17-41/52-63 |
 | BLE 协议 | **v2** | 17 字节外壳：`5A SRC DST 0A TYPE DATA[10] CRC A5`；`C1` 遥控 / `C2` 编程请求 / `D2` 完成·查询·错误 / `D3` 事件 |
 | 遥控帧 | v1 | 原 C1 帧完全兼容：`5A 97 98 0A C1 + 10B 键位图 + CRC + A5` |
-| BLE 透传 | — | ECB00 默认从机透传，连接状态用 **PF3 电平**（高=已连接），不解析字符串 |
+| BLE 透传 | — | ECB02 从机透传，连接状态用 **PF3 电平**（高=已连接），收发按保护间隔错峰调度 |
 
 > 协议 ID 权威映射：`Protocol/Proto_Asr.h`（宏）+ `Protocol/Proto_Asr.c`（`cmd_to_voice[]` 表）。**改协议 ID 必须两处同步核对。**
 
@@ -218,6 +218,8 @@ UV4 -b MDK-ARM/XiaoBai.uvprojx -j0 -o build.log
 | 语音协议 v0.8 | `resource/语音芯片交互协议.md` |
 | BLE 协议 v2（编程模式） | `docs/BLE协议v2-编程模式.md` + 黄金帧 `docs/ble_v2_golden_frames.json` |
 | 编程上位机使用说明 | `tools/xiaobai_programmer/README.md` |
+| 上位机协议/指令/用法/发送周期 | `docs/上位机编程协议与用法.md` |
+| 手机 APP BLE 控制协议（APP 端开发） | `docs/手机APP-BLE控制协议.md` |
 | 需求来源 | `docs/小白控制功能表.md` |
 
 ---
