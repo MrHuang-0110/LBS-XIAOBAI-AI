@@ -39,6 +39,14 @@ from xiaobai.protocol import OP_ENTER_PROGRAM, OP_ENTER_REMOTE
 from xiaobai.transport import BleTransport, TransportConfig, FakeTransport
 from xiaobai.simulator import FakeDevice  # pyright: ignore[reportMissingImports]  -- 模块已实现并被测试覆盖，分析器快照滞后
 from xiaobai.ui.bridge import BlocklyBridge  # pyright: ignore[reportMissingImports]  -- PySide6 仅 Windows 运行依赖
+from xiaobai.ui.policy import (
+    PROGRAM_TAB_TITLES,
+    SESSION_ENTER,
+    SESSION_HEARTBEAT,
+    SESSION_SKIP,
+    ProgramSessionPolicy,
+    StatusPollPolicy,
+)
 
 RESOURCES = Path(__file__).resolve().parents[1] / "resources"
 CONFIG_PATH = Path.home() / ".xiaobai_programmer" / "config.json"
@@ -62,15 +70,19 @@ class MainWindow(QWidget):
         self.runner = ProgramRunner(self.session)
         self.fake: FakeDevice | None = None
         self.loop = self.transport._loop
+        self.status_policy = StatusPollPolicy()
+        self.session_policy = ProgramSessionPolicy()
 
         self._build_ui()
+        self.status_policy.on_tab_changed(self.tabs.tabText(self.tabs.currentIndex()))
         self.logSignal.connect(self.log_view.appendPlainText)
         self.statusSignal.connect(self._render_status)
         self.errorSignal.connect(self._error)
         self.bleStateSignal.connect(self._apply_ble_state)
+        # 状态查询只在“状态”页可见时周期发送（进页立刻查一次），
+        # 避免直接控制/程序执行期间的后台轮询抢占前台指令。
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self._poll_status)
-        self.status_timer.start(500)
 
     # ---------------- UI ----------------
 
@@ -263,12 +275,21 @@ class MainWindow(QWidget):
     def _apply_ble_state(self, connected: bool, info: str) -> None:
         self.connect_label.setText(("已连接：" + info) if connected else "未连接")
         self.log(("已连接 " if connected else "已断开 ") + info)
-        if connected and self.tabs.tabText(self.tabs.currentIndex()) == "Blockly 编程":
-            self._send_session(OP_ENTER_PROGRAM)
+        if not connected:
+            self.session_policy.reset()
+            # 在 BLE 事件循环线程里取消心跳任务，避免跨线程 cancel
+            if self.loop.is_running():
+                self.loop.call_soon_threadsafe(self.session.stop_heartbeat)
+            return
+        title = self.tabs.tabText(self.tabs.currentIndex())
+        if title in PROGRAM_TAB_TITLES:
+            self._ensure_program_session()
+        elif title == "状态":
+            self._poll_status()
 
-    def _send_ble(self, data: bytes):
+    def _send_ble(self, data: bytes, priority: bool = False):
         """把线程池 Future 适配成执行器可 await 的对象（UI 线程不阻塞）。"""
-        return asyncio.wrap_future(self.transport.send(data))
+        return asyncio.wrap_future(self.transport.send(data, priority))
 
     def _connect_demo(self) -> None:
         """离线演示：本地模拟 MCU，便于无硬件验证 Blockly 流程。"""
@@ -305,6 +326,9 @@ class MainWindow(QWidget):
             self._fire(0x21, bytes([value]))
 
     def _fire(self, opcode: int, args: bytes) -> None:
+        # 每个前台动作前先确保编程会话（停止/中止后心跳已停，需重建）
+        self._ensure_program_session()
+
         async def coro() -> None:
             await self.session.request_no_reply(opcode, args)
 
@@ -312,9 +336,30 @@ class MainWindow(QWidget):
 
     def _send_session(self, opcode: int) -> None:
         if opcode == OP_ENTER_PROGRAM:
-            self._submit(self.session.enter_program())
+            self._ensure_program_session()
         elif opcode == OP_ENTER_REMOTE:
+            self.session_policy.reset()
             self._submit(self.session.enter_remote())
+
+    async def _ensure_program_session_async(self) -> None:
+        """确保编程会话（ENTER_PROGRAM + 心跳）；同一连接内只发一次。"""
+        connected = self.transport.connected or self.fake is not None
+        action = self.session_policy.decide(connected=connected, aborted=self.session.aborted)
+        if action == SESSION_HEARTBEAT:
+            self.session.start_heartbeat()   # 幂等：兜底恢复停止/中止后的心跳
+            return
+        if action == SESSION_SKIP:
+            raise ConnectionError("BLE 未连接")
+        try:
+            await self.session.enter_program()
+        except Exception:
+            self.session_policy.on_enter_failed()
+            raise
+
+    def _ensure_program_session(self) -> None:
+        if not (self.transport.connected or self.fake is not None):
+            return
+        self._submit(self._ensure_program_session_async())
 
     def _run_workspace(self, workspace_json: str) -> None:
         try:
@@ -326,7 +371,7 @@ class MainWindow(QWidget):
 
         async def coro():
             try:
-                await self.session.enter_program()
+                await self._ensure_program_session_async()
                 await self.runner.run(program)
             except ExecutorError as exc:
                 self.errorSignal.emit(str(exc))
@@ -371,8 +416,16 @@ class MainWindow(QWidget):
         self.log(f"工程已加载：{path}")
 
     def _poll_status(self) -> None:
-        if self.transport.connected or self.fake is not None:
-            self._submit(self.session.query_status())
+        connected = self.transport.connected or self.fake is not None
+        # 只在“状态”页可见时轮询：直接控制/Blockly 页面的后台查询会与按钮指令抢写锁；
+        # 执行程序（尤其 WAIT_VOICE）时不发周期查询，上一条查询未回时不叠加。
+        if not self.status_policy.should_query(
+            connected=connected,
+            runner_running=self.runner.running,
+            query_pending=self.session.status_query_pending,
+        ):
+            return
+        self._submit(self.session.query_status())
 
     # ---------------- 工具 ----------------
 
@@ -389,10 +442,17 @@ class MainWindow(QWidget):
 
     def _on_tab_changed(self, index: int) -> None:
         title = self.tabs.tabText(index)
-        if title != "Blockly 编程":
+        if self.status_policy.on_tab_changed(title):
+            self._poll_status()          # 进页立即查一次
+        interval = self.status_policy.timer_interval_ms()
+        if interval:
+            self.status_timer.start(interval)
+        else:
+            self.status_timer.stop()
+        if title not in PROGRAM_TAB_TITLES:
             return
         if self.transport.connected or self.fake is not None:
-            self._send_session(OP_ENTER_PROGRAM)
+            self._ensure_program_session()
         else:
             self.log("尚未连接设备：请先在「设备连接」页连接 BLE，或点「离线演示（模拟设备）」")
 
@@ -411,6 +471,9 @@ class MainWindow(QWidget):
         QMessageBox.warning(self, "小白编程", message)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        self.status_timer.stop()
+        if self.loop.is_running():
+            self.loop.call_soon_threadsafe(self.session.stop_heartbeat)
         self.transport.shutdown()
         super().closeEvent(event)
 

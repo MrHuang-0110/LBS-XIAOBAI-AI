@@ -1,6 +1,6 @@
 """BLE 传输层：bleak（Windows BLE GATT）+ 自动重连 + UUID 持久化。
 
-- ECB00CV2 默认走透传 GATT；不同 Windows 蓝牙适配器/固件暴露的 UUID 可能不同，
+- ECB02 默认走透传 GATT；不同 Windows 蓝牙适配器/固件暴露的 UUID 可能不同，
   因此首次连接后自动发现“可写 + 可通知”特征并持久化，后续直接复用。
 - 所有 bleak 调用都跑在专用 asyncio 事件循环线程里，Qt 主线程通过
   `call_soon_threadsafe`/`run_coroutine_threadsafe` 交互。
@@ -11,14 +11,15 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
 from xiaobai.protocol import Frame, StreamParser
 
-# 常见 ECB00/透传模块 UUID（仅作为发现优先级，不作为唯一依据）
+# 常见 ECB02/兼容透传模块 UUID（仅作为发现优先级，不作为唯一依据）
 PREFERRED_WRITE_UUIDS = (
-    "0000fff2-0000-1000-8000-00805f9b34fb",   # ECB00 实测写特征（FFF0 服务的 FFF2）
+    "0000fff2-0000-1000-8000-00805f9b34fb",   # ECB02 实测写特征（FFF0 服务的 FFF2）
     "0000ffe1-0000-1000-8000-00805f9b34fb",
     "6e400002-b5a3-f393-e0a9-e50e24dcca9e",   # Nordic UART RX
 )
@@ -27,7 +28,16 @@ PREFERRED_NOTIFY_UUIDS = (
     "0000fff1-0000-1000-8000-00805f9b34fb",
     "6e400003-b5a3-f393-e0a9-e50e24dcca9e",   # Nordic UART TX
 )
-NAME_HINTS = ("Spark_AI", "XiaoBai", "小白", "ECB00", "FFE0")
+NAME_HINTS = ("Spark_AI", "XiaoBai", "小白", "ECB02", "ECB00", "FFE0")
+
+# ECB02 串口透传在快速连续写、通知与写同时发生时容易丢包。
+# 17 字节帧在 9600 baud 下线速约 18ms，取 30ms 留出串口和 BLE 转发余量。
+WRITE_GUARD_SECONDS = 0.030
+NOTIFY_TO_WRITE_GUARD_SECONDS = 0.030
+
+# 后台帧（心跳/状态查询）等待超过该时长后不再允许被后来的前台帧插队，
+# 防止连续按钮流把 600ms 硬上限心跳饿死（旧固件 1000ms 会误判断连）。
+BACKGROUND_STARVATION_GUARD_SECONDS = 0.25
 
 
 class TransportConfig:
@@ -67,7 +77,7 @@ class FakeTransport:
         self.on_frame: Optional[Callable[[Frame], None]] = None
         self.connected = True
 
-    def send(self, data: bytes) -> None:
+    def send(self, data: bytes, priority: bool = False) -> None:
         if not self.connected:
             raise ConnectionError("未连接")
         self.sent.append(bytes(data))
@@ -100,6 +110,13 @@ class BleTransport:
         self._connected = False
         self._closing = False
         self._on_state: Optional[Callable[[bool, str], None]] = None
+        # 待发写队列：(是否前台, 数据, 完成 future, 入队时刻)。前台帧插到
+        # 尚未超时的后台等待者之前（同级 FIFO），避免按钮命令排在心跳/轮询
+        # 后面；已等待过久的后台帧受饥饿保护，不被后续前台帧无限插队。
+        self._write_queue: list[tuple[bool, bytes, asyncio.Future, float]] = []
+        self._writer_active = False
+        self._last_write_done = 0.0
+        self._last_notify_at = 0.0
 
     # ---------------- 事件循环桥接 ----------------
 
@@ -203,6 +220,7 @@ class BleTransport:
 
     async def _disconnect_async(self) -> None:
         self._closing = True
+        self._fail_queued_writes(ConnectionError("BLE 已断开"))
         if self.client is not None:
             try:
                 if self.notify_uuid:
@@ -244,18 +262,65 @@ class BleTransport:
     # ---------------- 数据 ----------------
 
     def _on_notify(self, _char, data: bytearray) -> None:
+        self._last_notify_at = time.monotonic()
         frames = self.parser.feed(bytes(data))
         for frame in frames:
             if self.on_frame:
                 self.on_frame(frame)
 
-    async def _send_async(self, data: bytes) -> None:
+    async def _wait_for_write_turn(self) -> None:
+        deadline = max(
+            self._last_write_done + WRITE_GUARD_SECONDS,
+            self._last_notify_at + NOTIFY_TO_WRITE_GUARD_SECONDS,
+        )
+        delay = deadline - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+    def _fail_queued_writes(self, exc: Exception) -> None:
+        while self._write_queue:
+            _, _, future, _ = self._write_queue.pop(0)
+            if not future.done():
+                future.set_exception(exc)
+
+    def _settle(self, future: asyncio.Future, exc: Optional[Exception]) -> None:
+        # future 可能已被调用方取消（超时/退出），只能设置一次结果
+        if future.done():
+            return
+        if exc is None:
+            future.set_result(None)
+        else:
+            future.set_exception(exc)
+
+    def _enqueue_write(self, data: bytes, priority: bool) -> asyncio.Future:
+        future = asyncio.get_running_loop().create_future()
+        now = time.monotonic()
+        entry = (priority, bytes(data), future, now)
+        if priority:
+            # 插到第一个“尚未等待过久”的后台等待者之前；前台/受保护后台保持 FIFO
+            index = len(self._write_queue)
+            for i, (queued_priority, _, _, queued_at) in enumerate(self._write_queue):
+                if not queued_priority and now - queued_at < BACKGROUND_STARVATION_GUARD_SECONDS:
+                    index = i
+                    break
+            self._write_queue.insert(index, entry)
+        else:
+            self._write_queue.append(entry)
+        if not self._writer_active:
+            self._writer_active = True
+            asyncio.get_running_loop().create_task(self._drain_writes())
+        return future
+
+    async def _write_once(self, data: bytes) -> None:
         if self.client is None or not self._connected:
             raise ConnectionError("BLE 未连接")
         if not self.write_uuid:
             raise RuntimeError("未发现可写特征")
+        # 心跳、状态查询和 Blockly 指令可能由不同协程同时发出。必须串行化并留
+        # 出 ECB02 收发保护间隔，否则 write_gatt_char 返回成功也可能在模块内丢帧。
+        await self._wait_for_write_turn()
         try:
-            # 实测（ECB00 + Windows）：无确认写会静默丢包且不报错，必须优先带确认写
+            # 实测（ECB02 + Windows）：无确认写会静默丢包且不报错，必须优先带确认写
             await self.client.write_gatt_char(self.write_uuid, data, response=True)
         except Exception as first:
             try:
@@ -264,6 +329,37 @@ class BleTransport:
                 raise RuntimeError(
                     f"BLE 写入失败（写特征 {self.write_uuid}）：{second} / 首次：{first}"
                 ) from second
+        finally:
+            self._last_write_done = time.monotonic()
 
-    def send(self, data: bytes):
-        return self.call(self._send_async(data))
+    async def _drain_writes(self) -> None:
+        try:
+            while self._write_queue:
+                _, data, future, _ = self._write_queue.pop(0)
+                if future.done():
+                    continue
+                try:
+                    await self._write_once(data)
+                except Exception as exc:  # noqa: BLE001 - 原样回传给调用方
+                    self._settle(future, exc)
+                else:
+                    self._settle(future, None)
+        finally:
+            self._writer_active = False
+
+    async def _send_async(self, data: bytes, priority: bool = False) -> None:
+        if self.client is None or not self._connected:
+            raise ConnectionError("BLE 未连接")
+        if not self.write_uuid:
+            raise RuntimeError("未发现可写特征")
+        future = self._enqueue_write(data, priority)
+        try:
+            await future
+        except asyncio.CancelledError:
+            if not future.done():
+                future.cancel()
+            raise
+
+    def send(self, data: bytes, priority: bool = False):
+        """提交一帧；priority=True 的前台帧不会排在心跳/状态查询之后。"""
+        return self.call(self._send_async(data, priority))

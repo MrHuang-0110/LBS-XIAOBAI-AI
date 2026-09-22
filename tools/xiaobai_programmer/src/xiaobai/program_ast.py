@@ -231,7 +231,7 @@ class _Parser:
     def parse_statement(self, block: dict, depth: int) -> dict:
         btype = block.get("type")
         if btype in _ACTION_TYPES:
-            return self._parse_action(block, btype)
+            return self._parse_action(block, btype, depth)
         if btype == "controls_repeat_ext":
             times = _extract_int(
                 _num_input(block, "TIMES", "重复"), 0, MAX_REPEAT, "重复次数"
@@ -260,7 +260,7 @@ class _Parser:
         inputs = _require_dict(block.get("inputs", {}), f"{block.get('type')}.inputs")
         return self.parse_chain(_child_block(inputs.get(name), name), depth + 1)
 
-    def _parse_action(self, block: dict, btype: str) -> dict:
+    def _parse_action(self, block: dict, btype: str, depth: int) -> dict:
         base = btype[len(_ACTION_PREFIX):]
         if base == "motor_time":
             return {
@@ -306,8 +306,16 @@ class _Parser:
             eye = _extract_int(_num_input(block, "EYE", "表情"), 1, 10, "表情编号")
             return {"type": "show_eye", "eye": eye}
         if base == "show_num":
-            number = _extract_int(_num_input(block, "NUM", "数字"), 0, 100, "显示数字")
-            return {"type": "show_num", "number": number}
+            # 显示数字支持表达式（红外值/电量/模式等），运行时求值并限幅 0-100；
+            # 字面量在解析期就校验范围，保持原有报错。
+            inputs = _require_dict(block.get("inputs", {}), "显示数字.inputs")
+            inner = _child_block(inputs.get("NUM"), "显示数字.NUM")
+            if inner is None:
+                raise ProgramSchemaError("显示数字: 缺少输入 NUM")
+            expr = parse_expression(inner, depth + 1)
+            if expr["type"] == "num":
+                _extract_int(expr["value"], 0, 100, "显示数字")
+            return {"type": "show_num", "value": expr}
         if base == "show_off":
             return {"type": "show_off"}
         if base == "play_voice":

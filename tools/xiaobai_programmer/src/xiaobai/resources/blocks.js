@@ -164,7 +164,7 @@
       args0: [{ type: "input_value", name: "NUM", check: "Number" }],
       ...statement,
       colour: 210,
-      tooltip: "显示 0–100，无前导零，居中",
+      tooltip: "显示 0–100（可接红外值/电量/模式等数值，超出范围按 0/100 限幅）；0–99 补零成两位，左右眼居中",
     },
     {
       type: "xiaobai_show_off",

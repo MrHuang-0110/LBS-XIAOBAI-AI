@@ -55,8 +55,8 @@ class RecordingTransport(FakeTransport):
         super().__init__()
         self.on_sent: Optional[Callable[[bytes], None]] = None
 
-    def send(self, data: bytes) -> None:
-        super().send(data)
+    def send(self, data: bytes, priority: bool = False) -> None:
+        super().send(data, priority)
         if self.on_sent is not None:
             self.on_sent(bytes(data))
 

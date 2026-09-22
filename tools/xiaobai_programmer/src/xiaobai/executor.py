@@ -60,6 +60,10 @@ from xiaobai.protocol import (
 )
 
 HEARTBEAT_INTERVAL = 0.3
+# 兼容旧固件：旧版只认显式 HEARTBEAT（1000ms 超时），即使前台流量不断，
+# 显式心跳也不能超过该间隔。新固件下前台有效 C2 本身即可续期。
+HEARTBEAT_MAX_INTERVAL = 0.6
+HEARTBEAT_TICK = 0.05   # 心跳调度粒度：睡眠式循环，天然不会补发积压心跳
 DEFAULT_WAIT_TIMEOUT = 60.0
 TIMED_EXTRA_TIMEOUT = 3.0
 
@@ -99,7 +103,7 @@ class ExecutorCallbacks:
 class DeviceSession:
     """一条 BLE 会话：心跳 + 请求/响应路由 + 事件分发。"""
 
-    def __init__(self, send: Callable[[bytes], Awaitable[None] | None],
+    def __init__(self, send: Callable[..., Awaitable[None] | None],
                  callbacks: ExecutorCallbacks | None = None,
                  wait_timeout: float = DEFAULT_WAIT_TIMEOUT):
         self._send = send
@@ -112,39 +116,66 @@ class DeviceSession:
         self._abort_reason = ""
         self.session_id = 0
         self.status = DeviceStatus()
+        self._last_foreground_at = 0.0   # 最近一次前台 C2 成功提交（monotonic）
+        self._last_hb_at = 0.0           # 最近一次显式心跳成功提交
 
     # ---------------- 发送 ----------------
 
-    async def _emit(self, data: bytes) -> None:
-        result = self._send(data)
+    async def _emit(self, data: bytes, priority: bool = False) -> None:
+        """发送一帧；priority=True 表示前台指令（按钮/程序动作/停止）。
+
+        传输层据此让前台帧排到待发后台帧（心跳/状态查询）之前，
+        并记录前台活跃时间，供心跳循环跳过冗余心跳。"""
+        result = self._send(data, priority)
         if asyncio.iscoroutine(result):
             await result
+        if priority:
+            self._last_foreground_at = time.monotonic()
 
-    async def send_c2(self, seq: int, opcode: int, args: bytes = b"") -> None:
-        await self._emit(build_c2(seq, opcode, args))
+    async def send_c2(self, seq: int, opcode: int, args: bytes = b"",
+                      priority: bool = False) -> None:
+        await self._emit(build_c2(seq, opcode, args), priority)
 
     async def send_c1(self, keys) -> None:
-        await self._emit(build_c1(keys))
+        await self._emit(build_c1(keys), priority=True)
 
     # ---------------- 会话控制 ----------------
 
     async def enter_program(self) -> None:
+        # 会话建立也算前台帧：必须排在按钮动作之前，否则动作先到会被非编程模式丢弃
         self.session_id += 1
-        await self.send_c2(0, OP_ENTER_PROGRAM)
+        await self.send_c2(0, OP_ENTER_PROGRAM, priority=True)
+        self.reset_abort()   # 进入编程模式即新会话：清掉上次停止/中止的残留状态
         self.callbacks.log("已请求进入编程模式")
         self.start_heartbeat()
 
     async def enter_remote(self) -> None:
         self.stop_heartbeat()
-        await self.send_c2(0, OP_ENTER_REMOTE)
+        await self.send_c2(0, OP_ENTER_REMOTE, priority=True)
         self.callbacks.log("已请求进入遥控模式")
 
-    async def heartbeat_once(self) -> None:
-        await self.send_c2(0, OP_HEARTBEAT)
+    async def heartbeat_once(self, priority: bool = False) -> None:
+        await self.send_c2(0, OP_HEARTBEAT, priority=priority)
+        self._last_hb_at = time.monotonic()
+
+    def heartbeat_due(self, now: float | None = None) -> bool:
+        """是否需要发送显式心跳。
+
+        - 空闲（300ms 内无前台 C2）：按 300ms 周期发；
+        - 前台指令刚发过：跳过冗余心跳，但显式心跳最长不超过 600ms
+          （兼容只认 HEARTBEAT 的旧固件）。"""
+        now = time.monotonic() if now is None else now
+        since_fg = now - self._last_foreground_at
+        since_hb = now - self._last_hb_at
+        if since_hb >= HEARTBEAT_MAX_INTERVAL:
+            return True
+        return since_fg >= HEARTBEAT_INTERVAL and since_hb >= HEARTBEAT_INTERVAL
 
     def start_heartbeat(self) -> None:
         if self._hb_task and not self._hb_task.done():
             return
+        # 从启动时刻起算心跳周期：ENTER_PROGRAM 刚刷新过看门狗，不必立刻补心跳
+        self._last_hb_at = time.monotonic()
         self._hb_task = asyncio.get_running_loop().create_task(self._heartbeat_loop())
 
     def stop_heartbeat(self) -> None:
@@ -153,28 +184,46 @@ class DeviceSession:
         self._hb_task = None
 
     async def _heartbeat_loop(self) -> None:
+        """单一实例的睡眠式循环：事件循环卡顿恢复后不会补发过期心跳。"""
         try:
             while True:
-                await self.heartbeat_once()
-                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                await asyncio.sleep(HEARTBEAT_TICK)
+                now = time.monotonic()
+                if not self.heartbeat_due(now):
+                    continue
+                # 到达 600ms 硬上限的心跳按前台优先级入队，确保不被连续前台帧饿死
+                hard_deadline = now - self._last_hb_at >= HEARTBEAT_MAX_INTERVAL
+                await self.heartbeat_once(priority=hard_deadline)
         except asyncio.CancelledError:
             pass
         except Exception as exc:  # noqa: BLE001 - 心跳失败上报但不崩
             self.callbacks.log(f"心跳发送失败：{exc}")
 
-    async def query_status(self) -> DeviceStatus:
+    @property
+    def status_query_pending(self) -> bool:
+        future = self._pending.get((0, OP_QUERY_STATUS))
+        return future is not None and not future.done()
+
+    async def query_status(self, timeout: float = 3.0) -> DeviceStatus:
         future = self._expect(0, OP_QUERY_STATUS)
-        await self.send_c2(0, OP_QUERY_STATUS)
-        frame = await self._wait(future, timeout=3.0)
+        try:
+            await self.send_c2(0, OP_QUERY_STATUS, priority=False)
+            frame = await self._wait(future, timeout=timeout)
+        finally:
+            # 超时/断连后清掉 pending，避免 status_query_pending 永久为真堵死轮询
+            self._pending.pop((0, OP_QUERY_STATUS), None)
         status = DeviceStatus.from_frame(frame)
         self.status = status
         self.callbacks.status(status)
         return status
 
-    async def read_ir(self, channel: int) -> int:
+    async def read_ir(self, channel: int, timeout: float = 3.0) -> int:
         future = self._expect(0, OP_READ_IR)
-        await self.send_c2(0, OP_READ_IR)
-        frame = await self._wait(future, timeout=3.0)
+        try:
+            await self.send_c2(0, OP_READ_IR, priority=False)
+            frame = await self._wait(future, timeout=timeout)
+        finally:
+            self._pending.pop((0, OP_READ_IR), None)
         if channel == 0:
             return frame.data[3]
         if channel == 1:
@@ -199,18 +248,23 @@ class DeviceSession:
         """发送一条动作指令并等待 DONE（支持设备 200ms 重发，丢首包不影响）。"""
         seq = self.seq.next()
         future = self._expect(seq, opcode)
-        await self.send_c2(seq, opcode, args)
-        self.callbacks.progress(f"发送指令 opcode=0x{opcode:02X} seq={seq}")
-        return await self._wait(future, timeout=timeout)
+        try:
+            await self.send_c2(seq, opcode, args, priority=True)
+            self.callbacks.progress(f"发送指令 opcode=0x{opcode:02X} seq={seq}")
+            return await self._wait(future, timeout=timeout)
+        finally:
+            # 超时后不得留下孤儿等待：迟到/重复 DONE 会被当作“无等待”忽略
+            self._pending.pop((seq, opcode), None)
 
     async def request_no_reply(self, opcode: int, args: bytes = b"") -> None:
         """不需要回报的动作（显示/功率/持续/停止/播放）。"""
         seq = self.seq.next()
-        await self.send_c2(seq, opcode, args)
+        await self.send_c2(seq, opcode, args, priority=True)
         self.callbacks.progress(f"发送指令 opcode=0x{opcode:02X} seq={seq}（无需回报）")
 
     async def stop_program(self) -> None:
-        await self.send_c2(0, OP_STOP_PROGRAM)
+        # 停止不做合并/延后：即使传输忙也要尽快插到后台帧之前
+        await self.send_c2(0, OP_STOP_PROGRAM, priority=True)
         self._abort("上位机停止程序")
 
     # ---------------- 帧路由 ----------------
@@ -342,7 +396,15 @@ class ProgramRunner:
         elif stype == "show_eye":
             await self.session.request_no_reply(OP_SHOW_EYE, bytes([stmt["eye"]]))
         elif stype == "show_num":
-            await self.session.request_no_reply(OP_SHOW_NUM, bytes([stmt["number"]]))
+            if "value" in stmt:
+                number = self._to_int(await self._eval(stmt["value"]), "显示数字")
+            else:
+                number = self._to_int(stmt.get("number", 0), "显示数字")  # 兼容旧工程
+            if number < 0:
+                number = 0
+            elif number > 100:
+                number = 100
+            await self.session.request_no_reply(OP_SHOW_NUM, bytes([number]))
         elif stype == "show_off":
             await self.session.request_no_reply(OP_SHOW_OFF)
         elif stype == "play_voice":

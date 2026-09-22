@@ -61,10 +61,24 @@ def test_display_and_voice_actions():
     assert types == [
         "show_eye", "show_num", "show_off", "play_voice", "wait_voice", "wait_ir", "wait",
     ]
+    assert program.statements[1] == {
+        "type": "show_num", "value": {"type": "num", "value": 100},
+    }
     assert program.statements[5] == {
         "type": "wait_ir", "channel": 2, "cmp": 1, "threshold": 50,
     }
     assert program.statements[6]["seconds"] == 1.5
+
+
+def test_show_num_accepts_ir_expression():
+    program = parse_workspace(workspace(
+        stmt("xiaobai_show_num", {}, {
+            "NUM": {"block": {"type": "xiaobai_ir_value", "fields": {"CHANNEL": "CENTER"}}},
+        }),
+    ))
+    assert program.statements[0] == {
+        "type": "show_num", "value": {"type": "ir", "channel": 1},
+    }
 
 
 def test_repeat_and_next_chain():
