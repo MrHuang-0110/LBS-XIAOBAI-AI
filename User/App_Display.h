@@ -16,8 +16,12 @@ void App_Display_Update(void);
 /** 显示表情 EYE_01..EYE_10（1..10），按帧时长循环到新指令 */
 void App_Display_ShowEye(uint8_t id);
 
-/** 显示数字 0..100（3×5 字库，无前导零，居中） */
+/** 显示数字 0..100（3×5 字库，7 行垂直居中）。
+ *  0–99 补零成两位：十位在左眼居中，个位在右眼居中（0–9 显示为 00–09）；100 整体居中。 */
 void App_Display_ShowNumber(uint8_t number);
+
+/** 诊断用：列 0..9 = C1 键位 0..9，列 10 = 本窗口收到任意 C1 帧（键位映射/帧活动） */
+void App_Display_ShowKeyMap(uint16_t mask, uint8_t activity);
 
 /** 关闭显示（保持关闭到新指令） */
 void App_Display_Off(void);

@@ -14,6 +14,10 @@
 #include "App_Shutdown.h"
 #include "App_Battery.h"
 
+/* 临时诊断（2026-09-22）：遥控模式把 C1 键位/帧活动画到眼睛屏，用于定位
+   长按顿挫。问题已定位，改回 0；需要再查遥控接收时改成 1。 */
+#define REMOTE_RX_DIAG  0
+
 /* 实体按键 → 目标模式（2026-09-16：KEY1 语音 / KEY2 动力 / KEY3 遥控 / KEY4 感应） */
 static App_Mode_t Key_TargetMode(Bsp_Key_Id_t kid)
 {
@@ -170,6 +174,10 @@ void App_Loop(void)
                 Bsp_UartAsr_SendPlay(ASR_VOICE_BLE_CONNECTED);
             } else if (!ble_now && ble_was_connected) {
                 Bsp_UartAsr_SendPlay(ASR_VOICE_BLE_LOST);
+                /* 遥控模式断连：立即刹停（不等 1s 帧超时，防遥控器断电/出范围 */
+                if (App_Mode_Get() == APP_MODE_REMOTE) {
+                    Bsp_Motor_BrakeAll();
+                }
                 /* 编程模式断连：刹停、取消任务、退出回语音模式 */
                 if (App_Mode_Get() == APP_MODE_PROGRAM) {
                     App_Program_ExitTo(APP_MODE_VOICE, PROTO_ABORT_BLE_LOST);
@@ -194,11 +202,38 @@ void App_Loop(void)
         /* --- 显示：待机/手动表情帧步进 --- */
         App_Display_Update();
 
+#if REMOTE_RX_DIAG
+        /* 遥控诊断：每 200ms 画“本窗口收到的 C1 按键位”到点阵：
+             列 1..10 = 键位 上/下/左/右/Y/A/X/B/R1/L1
+             列 11    = 帧活动灯（本窗口收到任意 C1 帧）
+           按键列闪、活动列稳 = 帧在到但键位断续（抖动）；两列同时灭 = 整帧断流。 */
+        {
+            static uint32_t diag_last = 0;
+            static uint8_t  diag_was_remote = 0;
+            uint32_t dnow = Bsp_Tick_GetMs();
+            if ((dnow - diag_last) >= 200U) {
+                diag_last = dnow;
+                if (App_Mode_Get() == APP_MODE_REMOTE) {
+                    uint16_t keys = App_Mode_Remote_TakeKeyMask();
+                    uint16_t frames = App_Mode_Remote_TakeFrames();
+                    App_Display_ShowKeyMap(keys, (frames != 0U) ? 1U : 0U);
+                    diag_was_remote = 1;
+                } else if (diag_was_remote) {
+                    diag_was_remote = 0;
+                    App_Display_Release();
+                }
+            }
+        }
+#endif
+
         /* --- PA9 呼吸灯：wake 启动 / sleep 熄灭 --- */
         App_Breath_Update();
 
         /* --- 电池采样 + 低电量播报 + D3 事件 --- */
         App_Battery_Update();
+
+        /* --- ECB02 发送队列：避开刚收到的数据，按收发保护间隔逐帧发送 --- */
+        Bsp_UartBle_Update();
 
         Bsp_Tick_DelayMs(5);
     }

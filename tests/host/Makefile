@@ -14,11 +14,14 @@ SRC = \
     $(ROOT)/tests/host/test_main.c \
     $(ROOT)/tests/host/test_proto_ble.c \
     $(ROOT)/tests/host/test_program.c \
+    $(ROOT)/tests/host/test_remote.c \
+    $(ROOT)/tests/host/test_uartble_rx.c \
     $(ROOT)/tests/host/test_display.c \
     $(ROOT)/tests/host/host_stub.c \
     $(ROOT)/Protocol/Proto_Ble.c \
     $(ROOT)/User/App_Program.c \
     $(ROOT)/User/App_Mode.c \
+    $(ROOT)/User/App_Mode_Remote.c \
     $(ROOT)/User/App_Display.c \
     $(ROOT)/User/App_Vehicle.c \
     $(ROOT)/User/Eye_Data.c

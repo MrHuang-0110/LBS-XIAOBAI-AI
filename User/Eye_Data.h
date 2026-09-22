@@ -22,7 +22,7 @@ typedef struct {
 /* 索引 0..9 = EYE_01..EYE_10 */
 extern const Eye_Anim_t g_eye_anims[EYE_ANIM_COUNT];
 
-/* 3×5 数字字库：每数字 3 列，bit0..bit4 = 行 0..4 */
+/* 3×5 数字字库：每数字 3 列，bit1..bit5 = 行 1..5（7 行点阵垂直居中） */
 extern const uint8_t g_digit_cols[10][3];
 
 #endif

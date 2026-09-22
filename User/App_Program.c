@@ -210,6 +210,16 @@ static uint8_t Prog_Validate(uint8_t opcode, const uint8_t *a)
 
 /* ---------- 执行 ---------- */
 
+/* 编程模式下收到结构+语义有效的 C2 视为会话活跃：新上位机会用前台指令夹带
+ * 心跳（省掉冗余心跳写），旧上位机的显式 HEARTBEAT 行为保持不变。
+ * 坏帧/非 C2/语义非法不能续期，避免损坏流量掩盖真实链损。 */
+static void Prog_KeepAlive(uint32_t now)
+{
+    s_last_hb = now;
+    s_hb_seen = 1;
+    s_fault &= (uint8_t)~PROTO_FAULT_HEARTBEAT;
+}
+
 static void Prog_SendError(uint8_t seq, uint8_t opcode, uint8_t result)
 {
     uint8_t data[7] = {0};
@@ -404,6 +414,9 @@ static void Prog_PollIrEvent(uint32_t now)
     }
     if (mask != s_ir_last_mask) {
         s_ir_last_mask = mask;
+        /* D3 红外事件只服务编程上位机；遥控/语音等模式下没必要上行，
+           否则会占用 ECB02 的收发通道，抢遥控 C1 帧（2026-09-22 定位）。 */
+        if (App_Mode_Get() != APP_MODE_PROGRAM) return;
         uint8_t d[8] = {0};
         d[0] = l;
         d[1] = c;
@@ -451,17 +464,18 @@ void App_Program_HandleFrame(const Proto_Ble_Frame_t *frame)
     /* 全局指令：任何模式都处理 */
     switch (opcode) {
     case PROTO_OP_ENTER_PROGRAM:
+        /* 幂等进入时 Prog_Enter 会提前返回，这里单独续期，保证语义统一 */
+        if (App_Mode_Get() == APP_MODE_PROGRAM) Prog_KeepAlive(now);
         Prog_Enter();
         return;
     case PROTO_OP_ENTER_REMOTE:
         Prog_EnterRemote();
         return;
     case PROTO_OP_HEARTBEAT:
-        s_last_hb = now;
-        s_hb_seen = 1;
-        s_fault &= (uint8_t)~PROTO_FAULT_HEARTBEAT;
+        Prog_KeepAlive(now);
         return;
     case PROTO_OP_QUERY_STATUS:
+        if (App_Mode_Get() == APP_MODE_PROGRAM) Prog_KeepAlive(now);
         Prog_SendStatus(seq);
         return;
     default:
@@ -473,6 +487,7 @@ void App_Program_HandleFrame(const Proto_Ble_Frame_t *frame)
 
     if (opcode == PROTO_OP_STOP_PROGRAM) {
         /* 停止程序：取消任务/回报、刹停双电机，留在编程模式，不回报 */
+        Prog_KeepAlive(now);
         Prog_CancelTask();
         Prog_StopDone();
         Bsp_Motor_BrakeAll();
@@ -480,7 +495,8 @@ void App_Program_HandleFrame(const Proto_Ble_Frame_t *frame)
     }
 
     if (opcode == PROTO_OP_READ_IR) {
-        /* 查询类：不影响任务与 DONE 重报 */
+        /* 查询类：不影响任务与 DONE 重报；语义恒定有效，可续期 */
+        Prog_KeepAlive(now);
         uint8_t d[7] = {0};
         d[0] = App_Program_ReadIr(PROTO_IR_LEFT);
         d[1] = App_Program_ReadIr(PROTO_IR_CENTER);
@@ -508,6 +524,7 @@ void App_Program_HandleFrame(const Proto_Ble_Frame_t *frame)
         return;
     }
 
+    Prog_KeepAlive(now);   /* 仅语义有效的动作指令可作为会话活跃凭据 */
     Prog_Execute(seq, opcode, args);
 }
 

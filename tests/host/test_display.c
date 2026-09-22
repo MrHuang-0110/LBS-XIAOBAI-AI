@@ -64,24 +64,35 @@ static void test_default_idle_and_release(void)
 
 static void test_number_layout(void)
 {
-    /* 单数字 0：居中在列 5..7 */
+    /* 0–9 补零成两位：0 → 左眼"0"(列 2..4) + 右眼"0"(列 9..11) */
     Host_Tm_Reset();
     App_Display_ShowNumber(0);
     for (unsigned c = 0; c < EYE_FRAME_COLS; c++) {
         uint8_t want = 0;
-        if (c >= 5 && c <= 7) want = g_digit_cols[0][c - 5];
+        if (c >= 2 && c <= 4) want = g_digit_cols[0][c - 2];
+        else if (c >= 9 && c <= 11) want = g_digit_cols[0][c - 9];
         CHECK_EQ(g_tm_last[c], want);
     }
 
-    /* 两位数 57：列 3..5 + 7..9 */
+    /* 5 → "05"：左眼"0"，右眼"5" */
+    Host_Tm_Reset();
+    App_Display_ShowNumber(5);
+    for (unsigned c = 0; c < EYE_FRAME_COLS; c++) {
+        uint8_t want = 0;
+        if (c >= 2 && c <= 4) want = g_digit_cols[0][c - 2];
+        else if (c >= 9 && c <= 11) want = g_digit_cols[5][c - 9];
+        CHECK_EQ(g_tm_last[c], want);
+    }
+
+    /* 两位数 57：十位在左眼居中（列 2..4），个位在右眼居中（列 9..11） */
     Host_Tm_Reset();
     App_Display_ShowNumber(57);
-    CHECK_EQ(g_tm_last[3], g_digit_cols[5][0]);
-    CHECK_EQ(g_tm_last[4], g_digit_cols[5][1]);
-    CHECK_EQ(g_tm_last[5], g_digit_cols[5][2]);
-    CHECK_EQ(g_tm_last[6], 0);
-    CHECK_EQ(g_tm_last[7], g_digit_cols[7][0]);
-    CHECK_EQ(g_tm_last[9], g_digit_cols[7][2]);
+    for (unsigned c = 0; c < EYE_FRAME_COLS; c++) {
+        uint8_t want = 0;
+        if (c >= 2 && c <= 4) want = g_digit_cols[5][c - 2];
+        else if (c >= 9 && c <= 11) want = g_digit_cols[7][c - 9];
+        CHECK_EQ(g_tm_last[c], want);
+    }
 
     /* 100：列 1..3 + 5..7 + 9..11，11 列完整放入 14 列 */
     Host_Tm_Reset();
@@ -104,16 +115,42 @@ static void test_number_layout(void)
     for (unsigned c = 0; c < EYE_FRAME_COLS; c++) CHECK_EQ(g_tm_last[c], 0);
 }
 
+static void test_diag_key_map(void)
+{
+    /* 诊断键位图：列 0..9 = 键位 0..9，列 10 = 帧活动灯；置位整列点亮（行 0..6） */
+    Host_Tm_Reset();
+    App_Display_ShowKeyMap((uint16_t)((1U << 0) | (1U << 3) | (1U << 9)), 1U);
+    for (unsigned c = 0; c < EYE_FRAME_COLS; c++) {
+        uint8_t want = (c == 0 || c == 3 || c == 9 || c == 10) ? 0x7FU : 0x00U;
+        CHECK_EQ(g_tm_last[c], want);
+    }
+
+    /* 无按键但有帧：只有活动灯亮 */
+    Host_Tm_Reset();
+    App_Display_ShowKeyMap(0, 1U);
+    for (unsigned c = 0; c < EYE_FRAME_COLS; c++) {
+        CHECK_EQ(g_tm_last[c], (c == 10) ? 0x7FU : 0x00U);
+    }
+
+    Host_Tm_Reset();
+    App_Display_ShowKeyMap(0, 0);
+    for (unsigned c = 0; c < EYE_FRAME_COLS; c++) CHECK_EQ(g_tm_last[c], 0);
+}
+
 static void test_digit_font(void)
 {
-    CHECK_EQ(g_digit_cols[0][0], 0x1F);
-    CHECK_EQ(g_digit_cols[0][1], 0x11);
-    CHECK_EQ(g_digit_cols[0][2], 0x1F);
-    CHECK_EQ(g_digit_cols[8][1], 0x15);
+    /* 5 行字模下移 1 行，在 7 行点阵（bit0..bit6）里垂直居中 */
+    CHECK_EQ(g_digit_cols[0][0], 0x1F << 1);
+    CHECK_EQ(g_digit_cols[0][1], 0x11 << 1);
+    CHECK_EQ(g_digit_cols[0][2], 0x1F << 1);
+    CHECK_EQ(g_digit_cols[8][1], 0x15 << 1);
     for (int d = 0; d < 10; d++) {
+        uint8_t all = 0;
         for (int c = 0; c < 3; c++) {
-            CHECK_EQ(g_digit_cols[d][c] & 0xE0U, 0);   /* 只用 bit0..4（5 行） */
+            CHECK_EQ(g_digit_cols[d][c] & 0x81U, 0);   /* 只用 bit1..5（居中 5 行） */
+            all |= g_digit_cols[d][c];
         }
+        CHECK(all & 0x20U);                            /* 字模最下行落在 bit5 */
     }
 }
 
@@ -124,6 +161,7 @@ int test_display(void)
     test_eye01_frame0_mapping();
     test_default_idle_and_release();
     test_number_layout();
+    test_diag_key_map();
     test_digit_font();
     return g_test_fail;
 }

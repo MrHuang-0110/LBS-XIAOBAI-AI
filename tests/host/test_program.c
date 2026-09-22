@@ -367,6 +367,87 @@ static void test_heartbeat_timeout_and_keepalive(void)
     if (ev >= 0) CHECK_EQ(g_tx[ev][7], PROTO_ABORT_HEARTBEAT);
 }
 
+/* 编程模式下结构+语义有效的 C2 也视为会话活跃：无显式心跳时不得误中止 */
+static void test_valid_c2_refreshes_watchdog(void)
+{
+    reset_world();
+    enter_program();                                /* s_last_hb = t0 */
+
+    /* 800ms 无心跳后下发有效查询：距进入点已 800ms，仍应视为活跃 */
+    advance_no_hb(800U);
+    uint8_t noargs[8] = {0};
+    send_c2(0, PROTO_OP_QUERY_STATUS, noargs);
+    CHECK_EQ(App_Mode_Get(), APP_MODE_PROGRAM);
+
+    /* 距查询 900ms 仍未超时（距进入累计 1700ms，旧逻辑会误中止） */
+    advance_no_hb(900U);
+    CHECK_EQ(App_Mode_Get(), APP_MODE_PROGRAM);
+
+    /* 幂等 ENTER_PROGRAM 也是语义有效的 C2，同样可续期（在超时前下发） */
+    send_c2(0, PROTO_OP_ENTER_PROGRAM, noargs);
+    advance_no_hb(900U);
+    CHECK_EQ(App_Mode_Get(), APP_MODE_PROGRAM);
+
+    /* 距最后一次有效 C2 超过 1000ms：原有中止行为保持不变 */
+    advance_no_hb(200U);
+    CHECK_EQ(App_Mode_Get(), APP_MODE_VOICE);
+    CHECK_EQ(Host_Play_CountOf(53), 1);
+    int ev = Host_Tx_FindData(PROTO_BLE_TYPE_D3, PROTO_EVT_PROGRAM_ABORT, 0xFFU, 0);
+    CHECK(ev >= 0);
+    if (ev >= 0) CHECK_EQ(g_tx[ev][7], PROTO_ABORT_HEARTBEAT);
+}
+
+static void test_valid_action_refreshes_watchdog(void)
+{
+    reset_world();
+    enter_program();
+
+    uint8_t run[8] = {PROTO_MOTOR_LEFT, PROTO_DIR_FORWARD, 0x64, 0, 0, 0, 0, 0}; /* 100ms */
+    advance_no_hb(800U);
+    send_c2(1, PROTO_OP_MOTOR_TIME, run);           /* 有效动作续期 */
+    advance_no_hb(900U);
+    CHECK_EQ(App_Mode_Get(), APP_MODE_PROGRAM);
+
+    /* 任务完成后的 DONE 重报不依赖心跳；超时后照常中止 */
+    CHECK(Host_Tx_FindData(PROTO_BLE_TYPE_D2, 1, PROTO_OP_MOTOR_TIME, 0) >= 0);
+    advance_no_hb(200U);
+    CHECK_EQ(App_Mode_Get(), APP_MODE_VOICE);
+}
+
+/* 坏校验/非 C2/语义非法都不能续期，否则损坏流量会掩盖真实链损 */
+static void test_invalid_traffic_does_not_refresh(void)
+{
+    reset_world();
+    enter_program();
+
+    advance_no_hb(800U);
+
+    /* 语义非法（方向 7）与未知操作码 */
+    uint8_t bad[8] = {PROTO_MOTOR_LEFT, 7, 100, 0, 0, 0, 0, 0};
+    send_c2(1, PROTO_OP_MOTOR_TIME, bad);
+    uint8_t unknown[8] = {0};
+    send_c2(2, 0x99, unknown);
+
+    /* 非 C2：C1 遥控帧由编程模式忽略，不得续期 */
+    uint8_t c1data[10] = {0};
+    uint8_t c1[17];
+    mk_frame(c1, PROTO_BLE_ADDR_APP, PROTO_BLE_ADDR_DEV, PROTO_BLE_TYPE_C1, c1data);
+    Proto_Ble_Feed(c1, PROTO_BLE_LEN);
+    Proto_Ble_Frame_t f;
+    while (Proto_Ble_GetFrame(&f)) App_Program_HandleFrame(&f);
+
+    /* 校验错误的 C2 由协议层丢弃，同样不得续期 */
+    uint8_t corrupt[17];
+    mk_c2(corrupt, 3, PROTO_OP_QUERY_STATUS, unknown);
+    corrupt[15] = (uint8_t)(corrupt[15] ^ 0xFFU);
+    Proto_Ble_Feed(corrupt, PROTO_BLE_LEN);
+    while (Proto_Ble_GetFrame(&f)) App_Program_HandleFrame(&f);
+
+    /* 距最后有效 C2（进入编程）累计 1000ms 即中止 */
+    advance_no_hb(200U);
+    CHECK_EQ(App_Mode_Get(), APP_MODE_VOICE);
+}
+
 static void test_query_status_and_read_ir(void)
 {
     reset_world();
@@ -464,6 +545,9 @@ int test_program(void)
     test_play_voice_mapping();
     test_stop_program();
     test_heartbeat_timeout_and_keepalive();
+    test_valid_c2_refreshes_watchdog();
+    test_valid_action_refreshes_watchdog();
+    test_invalid_traffic_does_not_refresh();
     test_query_status_and_read_ir();
     test_tick_wrap();
     test_enter_remote_and_key_exit();

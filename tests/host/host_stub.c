@@ -184,6 +184,6 @@ void Host_Tm_Reset(void)
 
 void Host_Led_Reset(void) { memset(g_led_state, 0, sizeof(g_led_state)); }
 
-/* ===== 测试专用：App_Mode 依赖的进入钩子（真 App_Mode.c 编译时链接） ===== */
-void App_Mode_Remote_Enter(void) { }
+/* ===== 测试专用：App_Mode 依赖的进入钩子（真 App_Mode.c 编译时链接） =====
+   App_Mode_Remote.c 已加入宿主测试，它的 Enter 用真实实现，不再打桩。 */
 void App_Mode_Sensor_Enter(void) { }

@@ -87,6 +87,8 @@ def frame_bytes(frame: dict) -> tuple[int, list[int]]:
 
 
 def digit_columns() -> list[list[int]]:
+    """3×5 点阵字库。点阵可用 7 行（bit0..bit6），5 行字模整体下移 1 行，
+    在 bit1..bit5 垂直居中，与表情区的行分布对齐。"""
     out = []
     for d in "0123456789":
         rows = DIGITS[d]
@@ -95,7 +97,7 @@ def digit_columns() -> list[list[int]]:
             byte = 0
             for r in range(5):
                 if rows[r][c] == "1":
-                    byte |= 1 << r
+                    byte |= 1 << (r + 1)
             cols.append(byte)
         out.append(cols)
     return out
@@ -126,7 +128,7 @@ typedef struct {
 /* 索引 0..9 = EYE_01..EYE_10 */
 extern const Eye_Anim_t g_eye_anims[EYE_ANIM_COUNT];
 
-/* 3×5 数字字库：每数字 3 列，bit0..bit4 = 行 0..4 */
+/* 3×5 数字字库：每数字 3 列，bit1..bit5 = 行 1..5（7 行点阵垂直居中） */
 extern const uint8_t g_digit_cols[10][3];
 
 #endif
@@ -160,7 +162,7 @@ def render_source(anims: list[dict]) -> str:
         out.append(f"    {{ {var}, {len(anim['frames'])} }},   /* EYE_{aid:02d} */\n")
     out.append("};\n\n")
 
-    out.append("/* 3×5 数字字库：每数字 3 列，bit0..bit4 = 行 0..4 */\n")
+    out.append("/* 3×5 数字字库：每数字 3 列，bit1..bit5 = 行 1..5（7 行点阵垂直居中） */\n")
     out.append("const uint8_t g_digit_cols[10][3] = {\n")
     for idx, cols in enumerate(digit_columns()):
         body = ", ".join(f"0x{b:02X}" for b in cols)

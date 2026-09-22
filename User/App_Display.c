@@ -13,31 +13,29 @@ static uint8_t     s_eye = 1;         /* 1..10 */
 static uint8_t     s_frame = 0;
 static uint32_t    s_frame_ms = 0;
 
-/* 3×5 数字 → 14 列缓冲：0–100 无前导零，居中（1 位起 5，2 位起 3，3 位起 1） */
+/* 把一位数字写到指定起始列（超出点阵宽度的部分忽略，防越界） */
+static void Disp_PutDigit(uint8_t *buf, uint8_t pos, uint8_t digit)
+{
+    for (uint8_t j = 0; j < 3U; j++) {
+        if ((uint16_t)(pos + j) < EYE_FRAME_COLS) {
+            buf[pos + j] = g_digit_cols[digit][j];
+        }
+    }
+}
+
+/* 3×5 数字 → 14 列缓冲（点阵分左右眼各 7 列）：
+ *   0–99：补零成两位——十位在左眼居中（列 2..4），个位在右眼居中（列 9..11）；
+ *         个位数显示为 00–09，不单独跨中间（一位数跨中会看起来像被切开）。
+ *   100 ：整体居中（列 1..11）。 */
 static void Disp_DrawNumber(uint8_t *buf, uint8_t number)
 {
-    uint8_t digits[3];
-    uint8_t count;
-
     if (number >= 100U) {
-        digits[0] = 1; digits[1] = 0; digits[2] = 0; count = 3;
-    } else if (number >= 10U) {
-        digits[0] = (uint8_t)(number / 10U);
-        digits[1] = (uint8_t)(number % 10U);
-        count = 2;
+        Disp_PutDigit(buf, 1U, 1U);
+        Disp_PutDigit(buf, 5U, 0U);
+        Disp_PutDigit(buf, 9U, 0U);
     } else {
-        digits[0] = number;
-        count = 1;
-    }
-
-    uint8_t width = (uint8_t)(count * 3U + (count - 1U));
-    uint8_t pos = (uint8_t)((EYE_FRAME_COLS - width) / 2U);
-
-    for (uint8_t i = 0; i < count; i++) {
-        for (uint8_t j = 0; j < 3U; j++) {
-            buf[pos++] = g_digit_cols[digits[i]][j];
-        }
-        if ((uint8_t)(i + 1U) < count) pos++;   /* 1 列间隔 */
+        Disp_PutDigit(buf, 2U, (uint8_t)(number / 10U));
+        Disp_PutDigit(buf, 9U, (uint8_t)(number % 10U));
     }
 }
 
@@ -74,9 +72,21 @@ void App_Display_Off(void)
     Bsp_Tm1640_Clear();
 }
 
+void App_Display_ShowKeyMap(uint16_t mask, uint8_t activity)
+{
+    uint8_t buf[EYE_FRAME_COLS] = {0};
+    for (uint8_t i = 0; i < 10U; i++) {
+        if (mask & (uint16_t)(1U << i)) buf[i] = 0x7FU;   /* 行 0..6 全高 */
+    }
+    if (activity) buf[10] = 0x7FU;   /* 第 11 列：窗口内收到过任意 C1 帧 */
+
+    s_mode = DISP_NUM;      /* 静态显示：不被表情动画帧覆盖 */
+    Bsp_Tm1640_Refresh(buf);
+}
+
 void App_Display_Release(void)
 {
-    App_Display_ShowEye(1U);   /* 退出编程模式：回到默认待机表情 */
+    App_Display_ShowEye(1U);   /* 退出编程模式/诊断：回到默认待机表情 */
 }
 
 void App_Display_Update(void)
