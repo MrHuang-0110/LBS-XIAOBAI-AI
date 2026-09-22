@@ -1,6 +1,7 @@
 #include "App_Mode.h"
 #include "Bsp.h"
 #include "Proto_Asr.h"
+#include "Proto_Ble.h"
 #include "App_Mode_Power.h"
 #include "App_Mode_Sensor.h"
 #include "App_Mode_Remote.h"
@@ -9,20 +10,22 @@
 static App_Mode_t g_mode = APP_MODE_VOICE;
 static uint8_t    g_mode_paused = 0;
 
-/* 模式 -> 对应 LED（KEY-LED 一一对应，2026-07-06 变更）：
-     语音->LED1 / 感应->LED2 / 遥控->LED4 / 动力->LED3
-   注：Bsp_Led 枚举名 LED_MODE_POWER 实际是 LED1(PB2)，LED_MODE_VOICE 是 LED4(PA12)，
-   名称跟模式不对应，但 mode_led[] 按物理 LED 映射，逻辑正确。 */
+/* 模式 → 物理 LED（2026-09-16 需求：KEY1+LED1=语音，KEY2+LED2=动力，
+   KEY3+LED4=遥控，KEY4+LED3=感应）。编程模式由 App_Program 四灯跑马接管，
+   此处不点单灯。 */
 static const Bsp_Led_Id_t mode_led[APP_MODE_COUNT] = {
-    LED_MODE_POWER,   /* APP_MODE_VOICE  -> LED1 */
-    LED_MODE_REMOTE,  /* APP_MODE_POWER  -> LED3 */
-    LED_MODE_SENSOR,  /* APP_MODE_SENSOR -> LED2 */
-    LED_MODE_VOICE,   /* APP_MODE_REMOTE -> LED4 */
+    LED_1,   /* APP_MODE_VOICE   */
+    LED_2,   /* APP_MODE_POWER   */
+    LED_3,   /* APP_MODE_SENSOR  */
+    LED_4,   /* APP_MODE_REMOTE  */
+    LED_1,   /* APP_MODE_PROGRAM（占位，实际不点） */
 };
-/* 模式 -> 进入时播报的语音 ID */
+
+/* 模式 → 进入时播报的语音 ID（编程模式由 App_Program 播 ID 52） */
 static const uint8_t mode_voice[APP_MODE_COUNT] = {
     ASR_VOICE_ENTER_VOICE, ASR_VOICE_ENTER_POWER,
     ASR_VOICE_ENTER_SENSOR, ASR_VOICE_ENTER_REMOTE,
+    ASR_VOICE_ENTER_PROGRAM,
 };
 
 App_Mode_t App_Mode_Get(void)        { return g_mode; }
@@ -32,10 +35,15 @@ void       App_Mode_SetPaused(uint8_t p) { g_mode_paused = p; }
 void App_Mode_Switch(App_Mode_t new_mode, uint8_t play_voice)
 {
     if (new_mode >= APP_MODE_COUNT) return;
-    Bsp_Motor_StopAll();
+
+    App_Mode_t prev = g_mode;
+
+    Bsp_Motor_BrakeAll();      /* 模式切换统一短刹（原为滑行停止） */
     g_mode = new_mode;
     Bsp_Led_AllOff();
-    Bsp_Led_On(mode_led[g_mode]);
+    if (new_mode != APP_MODE_PROGRAM) {
+        Bsp_Led_On(mode_led[g_mode]);   /* 编程模式 LED 由 App_Program 跑马控制 */
+    }
     if (new_mode == APP_MODE_REMOTE) {
         App_Mode_Remote_Enter();   /* 进遥控模式默认 2 档 70% */
     }
@@ -48,5 +56,13 @@ void App_Mode_Switch(App_Mode_t new_mode, uint8_t play_voice)
     if (play_voice) {
         Bsp_UartAsr_SendPlay(mode_voice[g_mode]);
         /* 不等 done，异步播报，保证按键灵敏 */
+    }
+
+    /* D3 模式变化事件（仅真实切换时上报） */
+    if (new_mode != prev) {
+        uint8_t d[8] = {0};
+        d[0] = (uint8_t)new_mode;
+        d[1] = (uint8_t)prev;
+        Proto_Ble_SendEvent(PROTO_EVT_MODE_CHANGE, d);
     }
 }

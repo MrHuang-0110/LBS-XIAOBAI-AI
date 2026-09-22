@@ -3,18 +3,20 @@
 #include "py32f0xx_hal.h"
 
 /*
- * USART1 (PB6=TX / PB7=RX, AF0) <-> ECB00CV2 BLE 芯片
- *   波特率 9600 8N1（ECB00 默认，datasheet 第 10 页）
+ * USART1 (PB6=TX / PB7=RX, AF0) <-> ECB02 BLE 芯片
+ *   当前硬件配置为 9600 8N1。
  *   PF3 = STA 引脚，下拉输入（datasheet 第 4 页要求）
  *
- * ECB00 工作模式：默认就是从机透传，无需 AT 配置主从。
+ * ECB02 工作模式：从机透传；收发切换需要保护间隔。
  *   本驱动只负责原始字节收发 + PF3 连接电平检测，不解析遥控帧；
  *   遥控帧协议（帧格式/按键枚举）见 Protocol/Proto_Remote.h。
  */
 
 #define BLE_RX_BUF_SIZE   128U
 
-/** 初始化 USART1 9600 8N1 + DMA 收 + IDLE，PF3 下拉输入 */
+/** 初始化 USART1 9600 8N1 + DMA 循环收 + IDLE，PF3 下拉输入
+ *  接收不依赖 IDLE：TryRecv 每次都会同步 DMA 增量，遥控器高速连发
+ *  （ECB02 输出无空闲间隔的连续流）也不会丢帧。 */
 void Bsp_UartBle_Init(void);
 
 /**
@@ -26,11 +28,15 @@ void Bsp_UartBle_Init(void);
  */
 void Bsp_UartBle_ConfigName(const char *name, uint8_t len);
 
-/** 发送若干字节（阻塞，超时 20ms） */
+/** 将待发送数据放入非阻塞发送队列；队列由 Bsp_UartBle_Update() 按保护间隔发送。 */
 void Bsp_UartBle_Send(const uint8_t *data, uint16_t len);
+
+/** 主循环周期调用：等待 ECB02 RX→TX 保护间隔后发送一帧。 */
+void Bsp_UartBle_Update(void);
 
 /**
  * @brief 读一段收到的原始数据（尽可能多），复制到 out_buf。
+ *        内部先同步 DMA 环形缓冲增量（关中断，不依赖 IDLE），再取走数据；
  *        本函数不做协议解析，调用方自己处理。
  * @return 实际拷贝的字节数（0 表示无数据）。
  */

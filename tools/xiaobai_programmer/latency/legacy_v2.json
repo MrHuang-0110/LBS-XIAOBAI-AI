@@ -1,0 +1,160 @@
+{
+  "label": "legacy",
+  "timestamp": "2026-09-22 09:53:59",
+  "address": "EC:B0:DA:20:2F:8F",
+  "samples_per_scenario": 120,
+  "hb_ms": 300.0,
+  "poll_ms": 1000.0,
+  "bg_policy": "legacy",
+  "guard_ms": 30,
+  "scenarios": [
+    {
+      "scenario": "idle",
+      "samples": 120,
+      "ok": 120,
+      "lost": 0,
+      "queue_wait_ms": {
+        "min": 0.0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "max": 0.0,
+        "n": 120
+      },
+      "guard_wait_ms": {
+        "min": 0.0,
+        "p50": 32.0,
+        "p95": 47.0,
+        "max": 47.0,
+        "n": 120
+      },
+      "write_ms": {
+        "min": 125.0,
+        "p50": 141.0,
+        "p95": 203.0,
+        "max": 203.0,
+        "n": 120
+      },
+      "rtt_ms": {
+        "min": 219.0,
+        "p50": 235.0,
+        "p95": 297.0,
+        "max": 313.0,
+        "n": 120
+      },
+      "heartbeats": 0,
+      "polls": 0,
+      "polls_lost": 0
+    },
+    {
+      "scenario": "heartbeat_300ms",
+      "samples": 120,
+      "ok": 120,
+      "lost": 0,
+      "queue_wait_ms": {
+        "min": 0.0,
+        "p50": 125.0,
+        "p95": 187.0,
+        "max": 188.0,
+        "n": 120
+      },
+      "guard_wait_ms": {
+        "min": 0.0,
+        "p50": 32.0,
+        "p95": 47.0,
+        "max": 47.0,
+        "n": 120
+      },
+      "write_ms": {
+        "min": 125.0,
+        "p50": 141.0,
+        "p95": 203.0,
+        "max": 204.0,
+        "n": 120
+      },
+      "rtt_ms": {
+        "min": 218.0,
+        "p50": 359.0,
+        "p95": 422.0,
+        "max": 438.0,
+        "n": 120
+      },
+      "heartbeats": 119,
+      "polls": 0,
+      "polls_lost": 0
+    },
+    {
+      "scenario": "poll_1s",
+      "samples": 120,
+      "ok": 120,
+      "lost": 0,
+      "queue_wait_ms": {
+        "min": 0.0,
+        "p50": 125.0,
+        "p95": 313.0,
+        "max": 422.0,
+        "n": 120
+      },
+      "guard_wait_ms": {
+        "min": 31.0,
+        "p50": 31.0,
+        "p95": 47.0,
+        "max": 47.0,
+        "n": 120
+      },
+      "write_ms": {
+        "min": 125.0,
+        "p50": 141.0,
+        "p95": 157.0,
+        "max": 266.0,
+        "n": 120
+      },
+      "rtt_ms": {
+        "min": 343.0,
+        "p50": 422.0,
+        "p95": 594.0,
+        "max": 672.0,
+        "n": 120
+      },
+      "heartbeats": 119,
+      "polls": 54,
+      "polls_lost": 0
+    },
+    {
+      "scenario": "mixed_200ms",
+      "samples": 120,
+      "ok": 120,
+      "lost": 0,
+      "queue_wait_ms": {
+        "min": 0.0,
+        "p50": 297.0,
+        "p95": 359.0,
+        "max": 375.0,
+        "n": 120
+      },
+      "guard_wait_ms": {
+        "min": 31.0,
+        "p50": 32.0,
+        "p95": 47.0,
+        "max": 47.0,
+        "n": 120
+      },
+      "write_ms": {
+        "min": 125.0,
+        "p50": 141.0,
+        "p95": 157.0,
+        "max": 282.0,
+        "n": 120
+      },
+      "rtt_ms": {
+        "min": 375.0,
+        "p50": 547.0,
+        "p95": 609.0,
+        "max": 657.0,
+        "n": 120
+      },
+      "heartbeats": 119,
+      "polls": 119,
+      "polls_lost": 0
+    }
+  ]
+}

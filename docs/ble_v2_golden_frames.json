@@ -1,0 +1,56 @@
+{
+  "comment": "小白 BLE 协议 v2 黄金帧（权威来源）。docs/BLE协议v2-编程模式.md §9 与 C/Python 测试共用；tests/host/golden_frames.h 由 tools/gen_golden.py 生成。",
+  "checksum": "sum(bytes[0..14]) & 0xFF",
+  "frames": [
+    {
+      "name": "C1_UP",
+      "desc": "C1 遥控：KeyUp 按下，App→设备",
+      "hex": "5A 97 98 0A C1 01 00 00 00 00 00 00 00 00 00 55 A5"
+    },
+    {
+      "name": "C2_MOTOR_TIME_LEFT_FWD_1000MS_SEQ1",
+      "desc": "C2 单电机定时：左电机正转 1000ms，seq=1",
+      "hex": "5A 97 98 0A C2 01 10 00 01 E8 03 00 00 00 00 52 A5"
+    },
+    {
+      "name": "C2_ENTER_PROGRAM_SEQ0",
+      "desc": "C2 进入编程模式，seq=0",
+      "hex": "5A 97 98 0A C2 00 01 00 00 00 00 00 00 00 00 56 A5"
+    },
+    {
+      "name": "C2_WAIT_IR_CENTER_GT_30_SEQ7",
+      "desc": "C2 等待红外：中通道 > 30，seq=7",
+      "hex": "5A 97 98 0A C2 07 30 01 00 1E 00 00 00 00 00 AB A5"
+    },
+    {
+      "name": "C2_SHOW_NUM_100_SEQ9",
+      "desc": "C2 显示数字 100，seq=9",
+      "hex": "5A 97 98 0A C2 09 41 64 00 00 00 00 00 00 00 03 A5"
+    },
+    {
+      "name": "C2_PLAY_VOICE_P03_SEQ10",
+      "desc": "C2 播放词条 P03，seq=10",
+      "hex": "5A 97 98 0A C2 0A 50 03 00 00 00 00 00 00 00 B2 A5"
+    },
+    {
+      "name": "D2_DONE_SEQ1_OP_0X10",
+      "desc": "D2 任务完成回报：seq=1，opcode=0x10",
+      "hex": "5A 98 97 0A D2 01 10 00 00 00 00 00 00 00 00 76 A5"
+    },
+    {
+      "name": "D2_QUERY_STATUS",
+      "desc": "D2 状态查询响应：语音模式，IR 10/20/30，3900mV，无任务无故障",
+      "hex": "5A 98 97 0A D2 00 04 00 00 0A 14 1E 3C 0F 00 F0 A5"
+    },
+    {
+      "name": "D3_MODE_CHANGE_PROGRAM",
+      "desc": "D3 模式变化事件：切到编程模式(4)",
+      "hex": "5A 98 97 0A D3 01 01 04 00 00 00 00 00 00 00 6C A5"
+    },
+    {
+      "name": "D3_PROTOCOL_ERROR_CHECKSUM",
+      "desc": "D3 协议错误事件：校验失败",
+      "hex": "5A 98 97 0A D3 07 01 02 00 00 00 00 00 00 00 70 A5"
+    }
+  ]
+}

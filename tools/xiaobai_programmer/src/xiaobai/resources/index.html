@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>小白 Blockly</title>
+  <script src="blockly/blockly_compressed.js"></script>
+  <script src="blockly/blocks_compressed.js"></script>
+  <script src="blockly/zh-hans.js"></script>
+  <script>
+    // 本地化：zh-hans.js 只合并 Blockly.Msg，需要显式 setLocale 才会生效
+    if (typeof Blockly !== "undefined") Blockly.setLocale(Blockly.Msg);
+  </script>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script>
+    if (typeof QWebChannel !== "function") {
+      window.addEventListener("DOMContentLoaded", () => {
+        const el = document.getElementById("err");
+        if (el) {
+          el.style.display = "block";
+          el.textContent = "页面错误：qwebchannel.js 未加载，无法与上位机通信（请检查 PySide6 安装是否完整）";
+        }
+      });
+    }
+  </script>
+  <script src="blocks.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    #blocklyDiv { position: absolute; inset: 0; }
+    #status { position: fixed; right: 10px; bottom: 8px; font: 12px sans-serif; color: #666; }
+    #err {
+      display: none; position: fixed; left: 0; right: 0; top: 0; z-index: 99;
+      padding: 8px 12px; background: #c62828; color: #fff; font: 13px/1.5 sans-serif;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="err"></div>
+  <div id="blocklyDiv"></div>
+  <div id="status">正在加载…</div>
+  <script>
+    // 任何脚本异常都显示在页面上，便于反馈（而不是只在控制台）
+    window.addEventListener("error", (event) => {
+      const el = document.getElementById("err");
+      if (el) {
+        el.style.display = "block";
+        el.textContent = "页面错误：" + (event.message || event.error || "未知错误");
+      }
+    });
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>
