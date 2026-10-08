@@ -48,6 +48,13 @@ extern int     g_play_count;
 void    Host_Play_Reset(void);
 int     Host_Play_CountOf(uint8_t id);
 
+/* ASR 唤醒控制捕获（v0.9：等待词条期间主控主动唤醒/退出唤醒） */
+#define HOST_ASR_CTL_MAX 64
+extern uint8_t g_asr_wakeup_s[HOST_ASR_CTL_MAX];   /* 每次 wakeup 请求的窗口秒数 */
+extern int     g_asr_wakeup_count;
+extern int     g_asr_sleep_count;
+void    Host_Asr_Ctl_Reset(void);
+
 /* 红外原始值 / 电池 / TM1640 */
 extern uint16_t g_ir_raw[3];
 extern uint16_t g_batt_mv;

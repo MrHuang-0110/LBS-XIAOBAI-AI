@@ -96,6 +96,19 @@ void Bsp_UartAsr_SendPlay(uint8_t voice_id)
     g_play_ids[g_play_count++] = voice_id;
 }
 
+/* v0.9：等待词条期间主控主动唤醒 ASRPRO / 请求退出唤醒 */
+uint8_t g_asr_wakeup_s[HOST_ASR_CTL_MAX];
+int     g_asr_wakeup_count = 0;
+int     g_asr_sleep_count = 0;
+
+void Bsp_UartAsr_SendWakeup(uint8_t seconds)
+{
+    if (g_asr_wakeup_count >= HOST_ASR_CTL_MAX) return;
+    g_asr_wakeup_s[g_asr_wakeup_count++] = seconds;
+}
+
+void Bsp_UartAsr_SendSleep(void) { g_asr_sleep_count++; }
+
 /* ===== 红外 / 电池 ===== */
 uint16_t Bsp_IR_ReadCh1(void) { return g_ir_raw[0]; }
 uint16_t Bsp_IR_ReadCh2(void) { return g_ir_raw[1]; }
@@ -160,6 +173,13 @@ int Host_Motor_Count(HostMotorOp_t op, int id)
 }
 
 void Host_Play_Reset(void) { g_play_count = 0; }
+
+void Host_Asr_Ctl_Reset(void)
+{
+    g_asr_wakeup_count = 0;
+    g_asr_sleep_count = 0;
+    memset(g_asr_wakeup_s, 0, sizeof(g_asr_wakeup_s));
+}
 
 int Host_Play_CountOf(uint8_t id)
 {

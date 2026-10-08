@@ -12,6 +12,18 @@
 #define PROG_IR_POLL_MS       100U    /* D3 红外事件采样周期 */
 #define PROG_IR_EVT_TH        50U     /* 触发掩码阈值（≥ 视为触发） */
 
+/* --- 等待词条期间的主动唤醒（协议 v0.9：wakeup=<sec> / sleep） ---
+ * ASRPRO 休眠时只加载唤醒词模型，命令词 42-51 识别不到，等待词条会永远不返回；
+ * 故等待期间由主控主动唤醒，并在命中/取消后立即请它退出唤醒。 */
+#define PROG_VOICE_WAKE_WINDOW_S  30U     /* 语音端唤醒窗口（秒） */
+#define PROG_VOICE_REARM_MS       10000U  /* 等待词条期间续期周期（须 < 窗口） */
+/* 词条命中后延迟收起唤醒：紧接着又是"等待词条"时直接不收起（否则 sleep/wakeup
+   一抖动就踩下面的异步坑）。取值须大于上位机 DONE→下一条 C2 的往返（实测几十 ms）。 */
+#define PROG_VOICE_EXIT_DELAY_MS   400U
+/* 等语音端"退出唤醒"落定的兜底超时：退出口播要先播完（实测 0.61s 静音版 /
+   2.45s"我去休息"版），故必须明显大于口播时长。 */
+#define PROG_VOICE_EXIT_TIMEOUT_MS 3000U
+
 /* --- 任务类型（与 QUERY_STATUS data6 高 4 位一致） --- */
 typedef enum {
     PROG_TASK_NONE = PROTO_TASK_NONE,
@@ -43,6 +55,20 @@ static uint8_t s_move_power  = 3;
 static uint32_t s_last_hb = 0;
 static uint8_t  s_hb_seen = 0;
 static uint8_t  s_fault = 0;      /* PROTO_FAULT_* 位或 */
+
+/* 等待词条期间对语音端的主动唤醒（v0.9） */
+static uint8_t  s_voice_awake = 0;         /* 已请求语音端主动唤醒 */
+static uint8_t  s_voice_exit_due = 0;      /* 已排定"收起唤醒"，到点下发 */
+static uint32_t s_voice_exit_at = 0;       /* 上述排定的下发时刻 */
+static uint32_t s_voice_rearm_ms = 0;      /* 下次续期时刻 */
+/* 语音端"退出唤醒"是异步流程（先播完退出口播 → 系统消息 → 切回唤醒词模型，实测
+   0.6~2.5s）；期间收到 wakeup，SDK 只重装定时器、不切命令词模型，随后落定的退出又把
+   模型切回唤醒词组 → 下一个等待词条永远识别不到（连续两个"等待词条"积木的卡死根因）。
+   故：① 紧接着又是等待词条时干脆不收起唤醒（见 PROG_VOICE_EXIT_DELAY_MS）；
+       ② 已经发了 sleep 时，必须等语音端上报 sleep（退出落定）再发 wakeup。 */
+static uint8_t  s_voice_exit_wait = 0;     /* 已发 sleep，等语音端确认退出落定 */
+static uint8_t  s_voice_wake_wait = 0;     /* 等待期间收到的新唤醒请求 */
+static uint32_t s_voice_exit_deadline = 0; /* 上述等待的兜底截止时刻 */
 
 /* 四灯跑马 */
 static uint32_t s_marquee_ms = 0;
@@ -121,10 +147,40 @@ static void Prog_BrakeMask(uint8_t mask)
 
 /* ---------- 任务与回报 ---------- */
 
+/* 开始等待词条：请求语音端唤醒。
+   ① 刚命中过词条但还没收起唤醒 → 直接取消失效的收起（连续等待不抖动）；
+   ② 上一条的"退出唤醒"已经在飞 → 先排队，等它落定再唤醒。 */
+static void Prog_VoiceWakeStart(uint32_t now)
+{
+    s_voice_exit_due = 0;
+    s_voice_awake = 1;
+    if (s_voice_exit_wait) {
+        s_voice_wake_wait = 1;      /* 由 App_Program_Update 在退出落定后补发 */
+        return;
+    }
+    s_voice_rearm_ms = now + PROG_VOICE_REARM_MS;
+    Bsp_UartAsr_SendWakeup((uint8_t)PROG_VOICE_WAKE_WINDOW_S);
+}
+
+/* 结束等待词条：排定"收起唤醒"，延迟一拍再由 App_Program_Update 下发。
+   延迟的用意：连续两个"等待词条"时上位机几十 ms 内就会发下一条，此时直接取消收起，
+   既省掉一次 sleep/wakeup 抖动，也避开语音端退出唤醒是异步流程的坑（见状态注释）。
+   程序真的停下不再有等待时，延迟到点照样收起，"识别后关闭唤醒"的要求不变。 */
+static void Prog_VoiceSleep(void)
+{
+    if (!s_voice_awake && !s_voice_exit_due) return;        /* 从未唤醒过，不必发 */
+    s_voice_wake_wait = 0;                                  /* 等待已取消，不必再唤醒 */
+    s_voice_awake = 0;
+    s_voice_exit_due = 1;
+    s_voice_exit_at = Prog_Now() + PROG_VOICE_EXIT_DELAY_MS;
+}
+
 static void Prog_CancelTask(void)
 {
     if (s_task.kind == PROG_TASK_MOTOR_TIME) {
         Prog_BrakeMask(s_task.motor_mask);   /* 旧任务在驱动电机：先刹停其控制的电机 */
+    } else if (s_task.kind == PROG_TASK_WAIT_VOICE) {
+        Prog_VoiceSleep();                   /* 词条等待被抢占/停止/退出：收起唤醒 */
     }
     s_task.kind = PROG_TASK_NONE;
 }
@@ -151,6 +207,8 @@ static void Prog_CompleteTask(void)
 
     if (s_task.kind == PROG_TASK_MOTOR_TIME) {
         Prog_BrakeMask(s_task.motor_mask);   /* 定时结束只刹任务控制的电机 */
+    } else if (s_task.kind == PROG_TASK_WAIT_VOICE) {
+        Prog_VoiceSleep();                   /* 词条命中：立即收起语音端唤醒 */
     }
     s_task.kind = PROG_TASK_NONE;
     Prog_SendDone(seq, op);
@@ -310,6 +368,7 @@ static void Prog_Execute(uint8_t seq, uint8_t opcode, const uint8_t *a)
         s_task.seq = seq;
         s_task.opcode = opcode;
         s_task.voice_item = a[0];
+        Prog_VoiceWakeStart(now);   /* 主动唤醒：不必先说唤醒词即可识别 42-51 */
         break;
 
     default:
@@ -440,6 +499,13 @@ void App_Program_Init(void)
     s_marquee_ms = 0;
     s_ir_last_mask = 0xFF;
     s_ir_last_ms = 0;
+    s_voice_awake = 0;
+    s_voice_exit_due = 0;
+    s_voice_exit_at = 0;
+    s_voice_rearm_ms = 0;
+    s_voice_exit_wait = 0;
+    s_voice_wake_wait = 0;
+    s_voice_exit_deadline = 0;
 }
 
 uint8_t App_Program_TaskCode(void)
@@ -528,6 +594,14 @@ void App_Program_HandleFrame(const Proto_Ble_Frame_t *frame)
     Prog_Execute(seq, opcode, args);
 }
 
+/* 语音端上报 sleep（退出唤醒流程已落定）：解除"等退出再唤醒"的等待。
+   同时也标记语音端已不醒着——若它是自己超时睡下的，下一次续期会把它重新唤醒。 */
+void App_Program_OnAsrSleep(void)
+{
+    s_voice_exit_wait = 0;
+    s_voice_awake = 0;
+}
+
 void App_Program_OnAsrCmd(uint8_t cmd)
 {
     if (App_Mode_Get() != APP_MODE_PROGRAM) return;
@@ -555,6 +629,25 @@ void App_Program_OnAsrCmd(uint8_t cmd)
 void App_Program_Update(void)
 {
     uint32_t now = Prog_Now();
+
+    /* 排定的"收起唤醒"到点下发（放在模式判断之前，退出编程模式/失联后也能补发）；
+       紧接着又有等待词条时 Prog_VoiceWakeStart 会把 s_voice_exit_due 清掉，不发这一帧 */
+    if (s_voice_exit_due && Prog_Due(now, s_voice_exit_at)) {
+        s_voice_exit_due = 0;
+        Bsp_UartAsr_SendSleep();
+        s_voice_exit_wait = 1;
+        s_voice_exit_deadline = now + PROG_VOICE_EXIT_TIMEOUT_MS;
+    }
+
+    /* 退出落定（语音端上报 sleep，或兜底超时）后，补发等待中的唤醒请求 */
+    if (s_voice_exit_wait && Prog_Due(now, s_voice_exit_deadline)) {
+        s_voice_exit_wait = 0;      /* 兜底：确认丢了也不能把等待卡死 */
+    }
+    if (!s_voice_exit_wait && s_voice_wake_wait) {
+        s_voice_wake_wait = 0;
+        s_voice_rearm_ms = now + PROG_VOICE_REARM_MS;
+        Bsp_UartAsr_SendWakeup((uint8_t)PROG_VOICE_WAKE_WINDOW_S);
+    }
 
     /* 红外变化事件：所有模式都推送（App 可用于状态显示） */
     Prog_PollIrEvent(now);
@@ -600,6 +693,16 @@ void App_Program_Update(void)
         break;
 
     case PROG_TASK_WAIT_VOICE:
+        /* 只要还在等词条就周期续期，保证"等待词条"不因语音端休眠而失效。
+           以"任务还在等"为条件（而不是"自认为已唤醒"）：语音端若是自己超时睡下的，
+           下一个周期也能把它重新唤醒；退出/补发流程在飞时不插队。 */
+        if (!s_voice_exit_wait && !s_voice_wake_wait && Prog_Due(now, s_voice_rearm_ms)) {
+            s_voice_rearm_ms = now + PROG_VOICE_REARM_MS;
+            s_voice_awake = 1;
+            Bsp_UartAsr_SendWakeup((uint8_t)PROG_VOICE_WAKE_WINDOW_S);
+        }
+        break;
+
     case PROG_TASK_NONE:
     default:
         break;

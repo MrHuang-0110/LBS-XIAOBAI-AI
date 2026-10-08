@@ -206,6 +206,18 @@ void Bsp_UartAsr_SendPlay(uint8_t voice_id)
 void Bsp_UartAsr_SendStop(void) { SendFrame("stop", 4); }
 void Bsp_UartAsr_SendPing(void) { SendFrame("ping", 4); }
 
+void Bsp_UartAsr_SendWakeup(uint8_t seconds)
+{
+    /* 最长 "wakeup=255" = 10 字节，缓冲取 11 + '\0' */
+    char buf[12];
+    if (seconds < 1U) seconds = 1U;
+    int n = snprintf(buf, sizeof(buf), "wakeup=%u", (unsigned)seconds);
+    if (n <= 0 || n >= (int)sizeof(buf)) return;
+    SendFrame(buf, (uint16_t)n);
+}
+
+void Bsp_UartAsr_SendSleep(void) { SendFrame("sleep", 5); }
+
 void Bsp_UartAsr_SendRaw(const uint8_t *data, uint16_t len)
 {
     /* 调试透传：绕过协议格式化，原样发；不追加 \n */

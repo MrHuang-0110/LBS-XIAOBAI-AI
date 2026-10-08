@@ -89,6 +89,8 @@ static void App_HandleAsr(const Bsp_UartAsr_Event_t *e)
     else if (e->type == ASR_EVT_SLEEP) {
         /* 休眠：立即熄灭呼吸灯，并上报 D3 SLEEP */
         App_Breath_Stop();
+        /* 编程模式"等待词条"：退出唤醒已落定，解除"等退出再唤醒"的排队 */
+        App_Program_OnAsrSleep();
         uint8_t d[8] = {0};
         Proto_Ble_SendEvent(PROTO_EVT_SLEEP, d);
     }
