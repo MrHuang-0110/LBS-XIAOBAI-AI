@@ -29,5 +29,9 @@ Thumbs.db
 .DS_Store
 *.swp
 
+# ===== 构建/工具日志与临时目录（不入库）=====
+*.log
+.superpowers/
+
 # ===== 本地开发约定（不入库，仅本机使用）=====
 AGENTS.md
