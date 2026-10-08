@@ -61,6 +61,7 @@ static void reset_world(void)
     Host_Ir_SetAll(4095U, 4095U, 4095U);
     g_batt_mv = 3900U;
     g_batt_low = 0;
+    Host_Asr_Ctl_Reset();
 }
 
 static void enter_program(void)
@@ -295,6 +296,178 @@ static void test_wait_voice(void)
     send_c2(10, PROTO_OP_WAIT_VOICE, w9);
     App_Program_OnAsrCmd(ASR_CMD_FORWARD);           /* cmd=6 前进 */
     CHECK(Host_Tx_FindData(PROTO_BLE_TYPE_D2, 10, PROTO_OP_WAIT_VOICE, 0) >= 0);
+}
+
+/* v0.9：等待词条期间主控主动唤醒 ASRPRO 并周期续期，命中/取消后立即请它退出唤醒 */
+static void test_wait_voice_wake_lifecycle(void)
+{
+    uint8_t a1[8] = {1, 0, 0, 0, 0, 0, 0, 0};        /* 等 ASR_01 */
+    uint8_t a2[8] = {2, 0, 0, 0, 0, 0, 0, 0};        /* 等 ASR_02 */
+    uint8_t noargs[8] = {0};
+
+    /* 1) 下发等待词条：立即请求唤醒（窗口 30s），不产生 sleep */
+    reset_world();
+    enter_program();
+    Host_Asr_Ctl_Reset();
+    send_c2(20, PROTO_OP_WAIT_VOICE, a1);
+    CHECK_EQ(g_asr_wakeup_count, 1);
+    if (g_asr_wakeup_count > 0) CHECK_EQ(g_asr_wakeup_s[0], 30);
+    CHECK_EQ(g_asr_sleep_count, 0);
+
+    /* 2) 等待期间每 10s 续期一次，且不产生 sleep */
+    advance_ms(10000U);
+    CHECK_EQ(g_asr_wakeup_count, 2);
+    CHECK_EQ(g_asr_sleep_count, 0);
+    advance_ms(10000U);
+    CHECK_EQ(g_asr_wakeup_count, 3);
+    CHECK_EQ(g_asr_sleep_count, 0);
+
+    /* 3) 不匹配词条：不结束等待、不收起唤醒 */
+    App_Program_OnAsrCmd(44);                        /* ASR_03：不匹配 */
+    CHECK_EQ(g_asr_sleep_count, 0);
+    CHECK_EQ(Host_Tx_FindData(PROTO_BLE_TYPE_D2, 20, PROTO_OP_WAIT_VOICE, 0), -1);
+
+    /* 4) 命中：回 DONE；收起唤醒延迟 400ms（给下一条"等待词条"留取消机会） */
+    App_Program_OnAsrCmd(42);                        /* ASR_01：匹配 */
+    App_Program_Update();
+    CHECK(Host_Tx_FindData(PROTO_BLE_TYPE_D2, 20, PROTO_OP_WAIT_VOICE, 0) >= 0);
+    CHECK_EQ(g_asr_sleep_count, 0);
+    advance_ms(500U);                                /* 延迟窗口到点 */
+    CHECK_EQ(g_asr_sleep_count, 1);
+
+    /* 5) 已退出唤醒：不再续期 */
+    advance_ms(30000U);
+    CHECK_EQ(g_asr_sleep_count, 1);
+
+    /* 6) 等待被新动作抢占：延迟到点后收起唤醒 */
+    reset_world();
+    enter_program();
+    Host_Asr_Ctl_Reset();
+    send_c2(21, PROTO_OP_WAIT_VOICE, a1);
+    CHECK_EQ(g_asr_wakeup_count, 1);
+    uint8_t run[8] = {PROTO_MOVE_FORWARD, 0, 0, 0, 0, 0, 0, 0};
+    send_c2(22, PROTO_OP_MOVE_RUN, run);
+    CHECK_EQ(g_asr_sleep_count, 0);                  /* 排定待下发 */
+    advance_ms(500U);
+    CHECK_EQ(g_asr_sleep_count, 1);
+
+    /* 7) 连续两个等待词条：取消旧等待不得发出 sleep（防语音端 sleep/wakeup 倒挂） */
+    reset_world();
+    enter_program();
+    Host_Asr_Ctl_Reset();
+    send_c2(23, PROTO_OP_WAIT_VOICE, a1);
+    send_c2(24, PROTO_OP_WAIT_VOICE, a2);
+    App_Program_Update();
+    CHECK_EQ(g_asr_sleep_count, 0);
+    CHECK_EQ(g_asr_wakeup_count, 2);
+
+    /* 8) STOP_PROGRAM：延迟到点后收起唤醒 */
+    reset_world();
+    enter_program();
+    Host_Asr_Ctl_Reset();
+    send_c2(25, PROTO_OP_WAIT_VOICE, a1);
+    send_c2(0, PROTO_OP_STOP_PROGRAM, noargs);
+    advance_ms(500U);
+    CHECK_EQ(g_asr_sleep_count, 1);
+
+    /* 9) 退出编程模式：mode 已切换仍须补发 sleep */
+    reset_world();
+    enter_program();
+    Host_Asr_Ctl_Reset();
+    send_c2(26, PROTO_OP_WAIT_VOICE, a1);
+    App_Program_ExitTo(APP_MODE_VOICE, PROTO_ABORT_KEY);
+    advance_ms(500U);
+    CHECK_EQ(g_asr_sleep_count, 1);
+
+    /* 10) 未唤醒过时不得凭空发 sleep（定时任务完成） */
+    reset_world();
+    enter_program();
+    Host_Asr_Ctl_Reset();
+    uint8_t mt[8] = {PROTO_MOTOR_LEFT, PROTO_DIR_FORWARD, 50, 0, 0, 0, 0, 0};
+    send_c2(27, PROTO_OP_MOTOR_TIME, mt);
+    advance_ms(100U);
+    CHECK_EQ(g_asr_wakeup_count, 0);
+    CHECK_EQ(g_asr_sleep_count, 0);
+}
+
+/* 连续两个"等待词条"（用户实测卡死的场景）：绝不能在两次等待之间收起唤醒。
+   语音端"退出唤醒"要先播完退出口播（实测 0.6~2.5s）才切回唤醒词模型，期间发 wakeup
+   会被随后落定的退出覆盖 → 第二个词条永远识别不到。主控的做法：命中后延迟 400ms 才
+   收起；若这期间又来"等待词条"，直接取消收起，芯片保持唤醒。 */
+static void test_wait_voice_consecutive(void)
+{
+    uint8_t a1[8] = {1, 0, 0, 0, 0, 0, 0, 0};        /* 等 ASR_01"开始" */
+    uint8_t a2[8] = {2, 0, 0, 0, 0, 0, 0, 0};        /* 等 ASR_02"下一步" */
+    uint8_t a3[8] = {3, 0, 0, 0, 0, 0, 0, 0};        /* 等 ASR_03"再来一次" */
+
+    reset_world();
+    enter_program();
+    Host_Asr_Ctl_Reset();
+
+    /* 第一个等待：立即唤醒 */
+    send_c2(30, PROTO_OP_WAIT_VOICE, a1);
+    CHECK_EQ(g_asr_wakeup_count, 1);
+
+    /* 命中"开始"：立刻回 DONE；收起唤醒要等 400ms 延迟 */
+    App_Program_OnAsrCmd(ASR_CMD_ASR_01);
+    App_Program_Update();
+    CHECK(Host_Tx_FindData(PROTO_BLE_TYPE_D2, 30, PROTO_OP_WAIT_VOICE, 0) >= 0);
+    CHECK_EQ(g_asr_sleep_count, 0);
+
+    /* 紧接着下发第二个等待（模拟上位机几十 ms 内跟上下一条）：取消收起 */
+    advance_ms(100U);
+    send_c2(31, PROTO_OP_WAIT_VOICE, a2);
+    advance_ms(2000U);                               /* 远超 400ms 延迟窗口 */
+    CHECK_EQ(g_asr_sleep_count, 0);                  /* 全程没发过 sleep ← 关键断言 */
+    CHECK_EQ(g_asr_wakeup_count, 2);                 /* 新等待各自唤醒一次，无额外抖动 */
+
+    /* 第二个词条直接识别成功（芯片一直醒着） */
+    App_Program_OnAsrCmd(ASR_CMD_ASR_02);
+    App_Program_Update();
+    CHECK(Host_Tx_FindData(PROTO_BLE_TYPE_D2, 31, PROTO_OP_WAIT_VOICE, 0) >= 0);
+
+    /* 再来第三个：同样不收起 */
+    advance_ms(100U);
+    send_c2(32, PROTO_OP_WAIT_VOICE, a3);
+    advance_ms(2000U);
+    CHECK_EQ(g_asr_sleep_count, 0);
+    CHECK_EQ(g_asr_wakeup_count, 3);
+
+    /* 程序停下（不再有等待词条）：400ms 后收起唤醒 */
+    App_Program_OnAsrCmd(ASR_CMD_ASR_03);
+    App_Program_Update();
+    CHECK_EQ(g_asr_sleep_count, 0);                  /* 延迟未到 */
+    advance_ms(500U);
+    CHECK_EQ(g_asr_sleep_count, 1);                  /* 到点收起 */
+
+    /* 若上位机慢到延迟窗口之后才发下一条等待：必须等退出落定（sleep 事件）再唤醒 */
+    reset_world();
+    enter_program();
+    Host_Asr_Ctl_Reset();
+    send_c2(33, PROTO_OP_WAIT_VOICE, a1);
+    App_Program_OnAsrCmd(ASR_CMD_ASR_01);
+    advance_ms(500U);                                /* 越过延迟窗口 → sleep 已发 */
+    CHECK_EQ(g_asr_sleep_count, 1);
+    send_c2(34, PROTO_OP_WAIT_VOICE, a2);
+    advance_ms(100U);
+    CHECK_EQ(g_asr_wakeup_count, 1);                 /* 退出未落定 → 不抢发 */
+    App_Program_OnAsrSleep();                        /* 语音端确认退出落定 */
+    App_Program_Update();
+    CHECK_EQ(g_asr_wakeup_count, 2);
+
+    /* 兜底：确认丢了（没收到 sleep 事件）也不能把等待卡死 */
+    reset_world();
+    enter_program();
+    Host_Asr_Ctl_Reset();
+    send_c2(35, PROTO_OP_WAIT_VOICE, a1);
+    App_Program_OnAsrCmd(ASR_CMD_ASR_01);
+    advance_ms(500U);
+    CHECK_EQ(g_asr_sleep_count, 1);
+    send_c2(36, PROTO_OP_WAIT_VOICE, a2);
+    advance_ms(100U);
+    CHECK_EQ(g_asr_wakeup_count, 1);
+    advance_ms(3000U);                               /* 兜底超时（3000ms）后补发 */
+    CHECK_EQ(g_asr_wakeup_count, 2);
 }
 
 static void test_play_voice_mapping(void)
@@ -542,6 +715,8 @@ int test_program(void)
     test_invalid_param_and_unknown_opcode();
     test_wait_ir();
     test_wait_voice();
+    test_wait_voice_wake_lifecycle();
+    test_wait_voice_consecutive();
     test_play_voice_mapping();
     test_stop_program();
     test_heartbeat_timeout_and_keepalive();

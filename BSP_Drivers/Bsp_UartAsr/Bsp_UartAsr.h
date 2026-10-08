@@ -33,6 +33,17 @@ void Bsp_UartAsr_SendStop(void);
 void Bsp_UartAsr_SendPing(void);
 
 /**
+ * @brief 发送 "wakeup=<sec>\n"：请求 ASRPRO 主动进入唤醒（sec 秒后自动休眠）。
+ *        v0.9 新增。仅编程模式"等待词条"任务使用：ASRPRO 休眠时只加载唤醒词模型，
+ *        命令词 42-51 识别不到，故等待期间由主控主动唤醒并周期续期。
+ * @param seconds 唤醒窗口秒数（1..255；0 会被钳到 1）
+ */
+void Bsp_UartAsr_SendWakeup(uint8_t seconds);
+
+/** 发送 "sleep\n"：请求 ASRPRO 立即退出唤醒（切回唤醒词模型）。v0.9 新增。 */
+void Bsp_UartAsr_SendSleep(void);
+
+/**
  * @brief 发送原始字节（调试用，绕过协议格式化）。
  *        直接 HAL_UART_Transmit，不加任何 tag/分隔符/帧尾。
  *        供调试时把其它来源的数据透传到 ASRPRO 串口观察。
